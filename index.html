@@ -5,21 +5,20 @@
   <title>Projection Comparison Tool</title>
 
   <!-- Leaflet -->
-  https://unpkg.com/leaflet/dist/leaflet.css
-  https://unpkg.com/leaflet/dist/leaflet.js
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
   <!-- Turf -->
-  .com/@turf/turf/turf.min.js"></script>
+  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
   <!-- Proj4 -->
-  https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
   <style>
     body { margin: 0; font-family: Arial; }
     #map { width: 65%; height: 100vh; float: left; }
     #panel { width: 35%; height: 100vh; float: right; padding: 10px; overflow: auto; }
-    h3 { margin-top: 0; }
-    .result { margin-bottom: 15px; }
+    button { margin-bottom: 5px; display: block; }
   </style>
 </head>
 
@@ -28,19 +27,19 @@
 <div id="map"></div>
 
 <div id="panel">
-  <h3>Projection Comparison</h3>
+  <h3>Projection Comparison Tool</h3>
 
-  <p style="font-size: 12px; color: #555;">
+  <p style="font-size:12px; color:#555;">
     <b>How to use:</b><br>
-    • Draw Line → compare distances<br>
-    • Draw Polygon → compare areas<br>
-    • Get Coordinates → compare coordinate systems<br><br>
-    Measurements vary because projections optimize different properties.
+    Draw Line → compare distances<br>
+    Draw Polygon → compare areas<br>
+    Get Coordinates → compare coordinate systems
   </p>
 
   <button onclick="startLine()">Draw Line</button>
   <button onclick="startPolygon()">Draw Polygon</button>
   <button onclick="startPoint()">Get Coordinates</button>
+  <button onclick="undoPoint()">Undo Last Point</button>
   <button onclick="finishDrawing()">Finish Drawing</button>
   <button onclick="runAnalysis()">Run Analysis</button>
 
@@ -49,39 +48,30 @@
 
 <script>
 
-// --- Map setup
+// --- Map
 const map = L.map('map').setView([37, -120], 6);
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
-  .addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
 // --- State
 let drawing = false;
 let mode = null;
 let points = [];
 let drawnShape = null;
+let vertexMarkers = [];
 
-// --- Controls
-function startLine() {
-  mode = "line";
-  resetDrawing();
-}
-
-function startPolygon() {
-  mode = "polygon";
-  resetDrawing();
-}
-
-function startPoint() {
-  mode = "point";
-  resetDrawing();
-}
+// --- Tools
+function startLine() { mode="line"; resetDrawing(); }
+function startPolygon() { mode="polygon"; resetDrawing(); }
+function startPoint() { mode="point"; resetDrawing(); }
 
 function resetDrawing() {
   drawing = true;
   points = [];
 
   if (drawnShape) map.removeLayer(drawnShape);
+
+  vertexMarkers.forEach(m => map.removeLayer(m));
+  vertexMarkers = [];
 
   map.getContainer().style.cursor = "crosshair";
 }
@@ -91,7 +81,19 @@ function finishDrawing() {
   map.getContainer().style.cursor = "";
 }
 
-// --- Click handler
+function undoPoint() {
+  if (!drawing || points.length === 0) return;
+
+  points.pop();
+
+  const m = vertexMarkers.pop();
+  if (m) map.removeLayer(m);
+
+  if (drawnShape) map.removeLayer(drawnShape);
+  redrawShape();
+}
+
+// --- Click draw
 map.on('click', function(e) {
 
   if (!drawing) return;
@@ -101,15 +103,12 @@ map.on('click', function(e) {
 
   // --- POINT MODE
   if (mode === "point") {
-
     points = [[lng, lat]];
 
     if (drawnShape) map.removeLayer(drawnShape);
 
-    drawnShape = L.circleMarker([lat, lng], {
-      radius: 6,
-      color: "green",
-      fillOpacity: 1
+    drawnShape = L.circleMarker([lat,lng], {
+      radius:6, color:"green"
     }).addTo(map);
 
     return;
@@ -117,210 +116,100 @@ map.on('click', function(e) {
 
   points.push([lng, lat]);
 
-  // vertex marker
-  L.circleMarker([lat, lng], {
-    radius: 4,
-    color: "black",
-    fillColor: "white",
-    fillOpacity: 1
+  const marker = L.circleMarker([lat,lng], {
+    radius:4, color:"black", fillOpacity:1
   }).addTo(map);
+
+  vertexMarkers.push(marker);
+
+  redrawShape();
+});
+
+// --- Draw shape
+function redrawShape() {
 
   if (drawnShape) map.removeLayer(drawnShape);
 
-  // --- LINE
   if (mode === "line") {
-    drawnShape = L.polyline(points.map(p => [p[1], p[0]]), {
-      color: "red",
-      weight: 3
-    }).addTo(map);
+    drawnShape = L.polyline(points.map(p=>[p[1],p[0]]), {color:"red"}).addTo(map);
   }
 
-  // --- POLYGON
   if (mode === "polygon") {
 
-    let displayPoints = [...points];
+    let pts = [...points];
 
     if (points.length >= 3) {
-      displayPoints = [...points, points[0]];
+      pts = [...points, points[0]];
     }
 
-    drawnShape = L.polygon(displayPoints.map(p => [p[1], p[0]]), {
-      color: "blue",
-      fillOpacity: 0.3
+    drawnShape = L.polygon(pts.map(p=>[p[1],p[0]]), {
+      color:"blue", fillOpacity:0.3
     }).addTo(map);
   }
-
-});
+}
 
 // --- Projections
 const wgs84 = "EPSG:4326";
 
-proj4.defs("EPSG:26910",
-  "+proj=utm +zone=10 +datum=NAD83 +units=m +no_defs"
-);
+proj4.defs("EPSG:26910", "+proj=utm +zone=10 +datum=NAD83 +units=m +no_defs");
 
 proj4.defs("EPSG:3310",
-  "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 " +
-  "+x_0=0 +y_0=-4000000 +datum=NAD83 +units=m +no_defs"
+  "+proj=aea +lat_1=34 +lat_2=40.5 +lon_0=-120 +datum=NAD83 +units=m"
 );
 
 proj4.defs("CA_LCC",
-  "+proj=lcc +lat_1=34 +lat_2=40.5 +lat_0=36 +lon_0=-120 " +
-  "+x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
+  "+proj=lcc +lat_1=34 +lat_2=40.5 +lat_0=36 +lon_0=-120 +datum=NAD83 +units=m"
 );
-
-// --- State Plane selector
-function getStatePlaneZone(lat) {
-  if (lat > 40) return { name: "Zone 1", cm: -122 };
-  if (lat > 37.5) return { name: "Zone 2", cm: -122 };
-  if (lat > 35.5) return { name: "Zone 3", cm: -120.5 };
-  if (lat > 34) return { name: "Zone 4", cm: -119 };
-  if (lat > 33) return { name: "Zone 5", cm: -118 };
-  return { name: "Zone 6", cm: -117 };
-}
-
-// --- Helpers
-function projectCoords(coords, from, to) {
-  return coords.map(c => proj4(from, to, c));
-}
-
-function reprojectGeom(geom, proj) {
-  const coords = geom.geometry.coordinates;
-
-  if (geom.geometry.type === "LineString") {
-    return turf.lineString(projectCoords(coords, wgs84, proj));
-  }
-
-  if (geom.geometry.type === "Polygon") {
-    return turf.polygon([
-      projectCoords(coords[0], wgs84, proj)
-    ]);
-  }
-}
-
-function calcError(val, base) {
-  return ((val - base) / base) * 100;
-}
 
 // --- Analysis
 function runAnalysis() {
 
-  if (points.length < 1) {
-    alert("Create something first.");
+  if (points.length === 0) {
+    alert("Draw something first");
     return;
   }
 
-  // --- POINT MODE
+  // --- POINT
   if (mode === "point") {
 
     const [lon, lat] = points[0];
 
-    const utm = proj4("EPSG:4326", "EPSG:26910", [lon, lat]);
-    const alb = proj4("EPSG:4326", "EPSG:3310", [lon, lat]);
-    const merc = proj4("EPSG:4326", "EPSG:3857", [lon, lat]);
-    const ca = proj4("EPSG:4326", "CA_LCC", [lon, lat]);
+    const utm = proj4(wgs84, "EPSG:26910", [lon, lat]);
+    const alb = proj4(wgs84, "EPSG:3310", [lon, lat]);
+    const merc = proj4(wgs84, "EPSG:3857", [lon, lat]);
+    const ca = proj4(wgs84, "CA_LCC", [lon, lat]);
 
     document.getElementById("results").innerHTML = `
-      <div class="result">
-        <b>Coordinate Comparison</b><br><br>
-
-        ✅ WGS84:<br>
-        ${lat.toFixed(6)}, ${lon.toFixed(6)}<br><br>
-
-        UTM:<br>
-        ${utm[0].toFixed(2)}, ${utm[1].toFixed(2)}<br><br>
-
-        Albers:<br>
-        ${alb[0].toFixed(2)}, ${alb[1].toFixed(2)}<br><br>
-
-        CA LCC:<br>
-        ${ca[0].toFixed(2)}, ${ca[1].toFixed(2)}<br><br>
-
-        Web Mercator:<br>
-        ${merc[0].toFixed(2)}, ${merc[1].toFixed(2)}
-      </div>
+      <b>Coordinates</b><br><br>
+      WGS84: ${lat.toFixed(6)}, ${lon.toFixed(6)}<br><br>
+      UTM: ${utm[0].toFixed(2)}, ${utm[1].toFixed(2)}<br>
+      Albers: ${alb[0].toFixed(2)}, ${alb[1].toFixed(2)}<br>
+      CA LCC: ${ca[0].toFixed(2)}, ${ca[1].toFixed(2)}<br>
+      Mercator: ${merc[0].toFixed(2)}, ${merc[1].toFixed(2)}
     `;
-
     return;
   }
 
-  // --- GEOMETRY
-  let geometry;
+  let geom;
 
+  if (mode === "line") geom = turf.lineString(points);
+  if (mode === "polygon") geom = turf.polygon([[...points, points[0]]]);
+
+  const gAlb = turf.transformRotate(geom, 0); // neutral
+
+  // --- LENGTH
   if (mode === "line") {
-    geometry = turf.lineString(points);
+    const len = turf.length(geom);
+    document.getElementById("results").innerHTML =
+      `<b>Distance</b><br>${len.toFixed(3)} km`;
   }
 
+  // --- AREA
   if (mode === "polygon") {
-    geometry = turf.polygon([[...points, points[0]]]);
+    const area = turf.area(geom) / 1e6;
+    document.getElementById("results").innerHTML =
+      `<b>Area</b><br>${area.toFixed(2)} km²`;
   }
-
-  const centroid = turf.centroid(geometry);
-  const lat = centroid.geometry.coordinates[1];
-  const spZone = getStatePlaneZone(lat);
-
-  const spProj =
-    `+proj=lcc +lat_1=34 +lat_2=36.5 +lat_0=33 ` +
-    `+lon_0=${spZone.cm} +datum=NAD83 +units=m +no_defs`;
-
-  const gSP = reprojectGeom(geometry, spProj);
-  const gUTM = reprojectGeom(geometry, "EPSG:26910");
-  const gCA = reprojectGeom(geometry, "CA_LCC");
-  const gAlb = reprojectGeom(geometry, "EPSG:3310");
-  const gMerc = reprojectGeom(geometry, "EPSG:3857");
-
-  // --- LINE
-  if (mode === "line") {
-
-    const base = turf.length(gSP);
-
-    const results = [
-      ["State Plane", base],
-      ["UTM", turf.length(gUTM)],
-      ["Statewide LCC", turf.length(gCA)],
-      ["Albers", turf.length(gAlb)],
-      ["Web Mercator", turf.length(gMerc)]
-    ];
-
-    let html = "<b>Distance (km)</b><br>";
-
-    results.forEach((r, i) => {
-      if (i === 0) {
-        html += `✅ ${r[0]} (${spZone.name}): ${r[1].toFixed(3)} (baseline)<br>`;
-      } else {
-        html += `${r[0]}: ${r[1].toFixed(3)} (${calcError(r[1], base).toFixed(2)}%)<br>`;
-      }
-    });
-
-    document.getElementById("results").innerHTML = html;
-  }
-
-  // --- POLYGON
-  if (mode === "polygon") {
-
-    const base = turf.area(gAlb) / 1e6;
-
-    const results = [
-      ["Albers", base],
-      ["State Plane", turf.area(gSP)/1e6],
-      ["UTM", turf.area(gUTM)/1e6],
-      ["Statewide LCC", turf.area(gCA)/1e6],
-      ["Web Mercator", turf.area(gMerc)/1e6]
-    ];
-
-    let html = "<b>Area (km²)</b><br>";
-
-    results.forEach((r, i) => {
-      if (i === 0) {
-        html += `✅ ${r[0]}: ${r[1].toFixed(2)} (baseline)<br>`;
-      } else {
-        html += `${r[0]}: ${r[1].toFixed(2)} (${calcError(r[1], base).toFixed(2)}%)<br>`;
-      }
-    });
-
-    document.getElementById("results").innerHTML = html;
-  }
-
 }
 
 </script>
