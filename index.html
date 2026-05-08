@@ -46,16 +46,16 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
 let drawnLine = null;
 let drawing = false;
+let points = [];
 
 // --- Enable drawing
 function enableDrawing() {
   drawing = true;
+  points = [];
   if (drawnLine) map.removeLayer(drawnLine);
 }
 
 // --- Capture clicks
-let points = [];
-
 map.on('click', e => {
   if (!drawing) return;
 
@@ -67,19 +67,61 @@ map.on('click', e => {
   }
 });
 
-// --- Define projections
+// --- Projection definitions
 
-// WGS84
 const wgs84 = 'EPSG:4326';
 
 // Web Mercator
 const mercator = 'EPSG:3857';
 
-// California statewide LCC (your approximation)
+// UTM Zone 10N
+proj4.defs("EPSG:26910",
+  "+proj=utm +zone=10 +datum=NAD83 +units=m +no_defs"
+);
+
+// CA Albers (equal-area)
+proj4.defs("EPSG:3310",
+  "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 " +
+  "+x_0=0 +y_0=-4000000 +datum=NAD83 +units=m +no_defs"
+);
+
+// CA Statewide (your LCC)
 proj4.defs("CA_LCC",
   "+proj=lcc +lat_1=34 +lat_2=40.5 +lat_0=36 +lon_0=-120 " +
   "+x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
 );
+
+// State Plane zones (simplified)
+function getStatePlaneZone(lat) {
+  if (lat > 40) return { name: "Zone 1", cm: -122 };
+  if (lat > 37.5) return { name: "Zone 2", cm: -122 };
+  if (lat > 35.5) return { name: "Zone 3", cm: -120.5 };
+  if (lat > 34) return { name: "Zone 4", cm: -119 };
+  if (lat > 33) return { name: "Zone 5", cm: -118 };
+  return { name: "Zone 6", cm: -117 };
+}
+
+// --- Helper functions
+
+function projectCoords(coords, from, to) {
+  return coords.map(c => proj4(from, to, c));
+}
+
+function lineLength(line) {
+  return turf.length(line, { units: "kilometers" });
+}
+
+function bufferArea(line, distKm) {
+  const buffer = turf.buffer(line, distKm, { units: "kilometers" });
+  return turf.area(buffer) / 1e6;
+}
+
+function error(val, base) {
+  return {
+    delta: val - base,
+    pct: ((val - base) / base) * 100
+  };
+}
 
 // --- Analysis
 function runAnalysis() {
@@ -89,52 +131,71 @@ function runAnalysis() {
     return;
   }
 
-  const line = turf.lineString(points);
+  const line4326 = turf.lineString(points);
 
-  // --- 1. Geodesic (truth baseline)
-  const geodesicLength = turf.length(line, {units: 'kilometers'});
+  // --- Determine best State Plane zone (based on centroid)
+  const centroid = turf.centroid(line4326);
+  const lat = centroid.geometry.coordinates[1];
 
-  // --- 2. Mercator (planar misuse)
-  const mercLine = turf.toMercator(line);
-  const mercLength = turf.length(mercLine, {units: 'kilometers'});
+  const spZone = getStatePlaneZone(lat);
 
-  // --- 3. CA projection
-  const caCoords = points.map(p => proj4(wgs84, "CA_LCC", p));
-  const caLine = turf.lineString(caCoords);
+  const spProj = `+proj=lcc +lat_1=34 +lat_2=36.5 +lat_0=33 +lon_0=${spZone.cm} +datum=NAD83 +units=m +no_defs`;
 
-  const caLength = turf.length(caLine, {units: 'kilometers'});
+  // --- Project lines
 
-  // --- Buffers (10 km)
-  const bufferDist = 10;
+  const lineMerc = turf.lineString(projectCoords(points, wgs84, mercator));
+  const lineUTM = turf.lineString(projectCoords(points, wgs84, "EPSG:26910"));
+  const lineAlbers = turf.lineString(projectCoords(points, wgs84, "EPSG:3310"));
+  const lineCA = turf.lineString(projectCoords(points, wgs84, "CA_LCC"));
+  const lineSP = turf.lineString(projectCoords(points, wgs84, spProj));
 
-  const geoBuffer = turf.buffer(line, bufferDist, {units: 'kilometers'});
-  const mercBuffer = turf.buffer(mercLine, bufferDist, {units: 'kilometers'});
-  const caBuffer = turf.buffer(caLine, bufferDist, {units: 'kilometers'});
+  // --- Lengths
+  const lenSP = lineLength(lineSP);     // ✅ baseline
+  const lenUTM = lineLength(lineUTM);
+  const lenCA = lineLength(lineCA);
+  const lenAlbers = lineLength(lineAlbers);
+  const lenMerc = lineLength(lineMerc);
 
-  // --- Areas
-  const geoArea = turf.area(geoBuffer) / 1e6; // km²
-  const mercArea = turf.area(mercBuffer) / 1e6;
-  const caArea = turf.area(caBuffer) / 1e6;
+  // --- Areas via buffer (10 km)
+  const areaAlbers = bufferArea(lineAlbers, 10);  // ✅ baseline
+  const areaSP = bufferArea(lineSP, 10);
+  const areaUTM = bufferArea(lineUTM, 10);
+  const areaCA = bufferArea(lineCA, 10);
+  const areaMerc = bufferArea(lineMerc, 10);
+
+  // --- Errors
+  const eUTM = error(lenUTM, lenSP);
+  const eCA = error(lenCA, lenSP);
+  const eAlb = error(lenAlbers, lenSP);
+  const eMerc = error(lenMerc, lenSP);
+
+  const aSP = error(areaSP, areaAlbers);
+  const aUTM = error(areaUTM, areaAlbers);
+  const aCA = error(areaCA, areaAlbers);
+  const aMerc = error(areaMerc, areaAlbers);
 
   // --- Output
   document.getElementById("results").innerHTML = `
 
   <div class="result">
-    <b>Segment Length (km)</b><br>
-    WGS84 (Geodesic): ${geodesicLength.toFixed(3)}<br>
-    Web Mercator: ${mercLength.toFixed(3)}<br>
-    CA Statewide: ${caLength.toFixed(3)}
+    <b>Distance (km)</b><br>
+    ✅ State Plane (${spZone.name}): ${lenSP.toFixed(3)} (baseline)<br>
+    UTM 26910: ${lenUTM.toFixed(3)} (${eUTM.pct.toFixed(2)}%)<br>
+    CA Statewide: ${lenCA.toFixed(3)} (${eCA.pct.toFixed(2)}%)<br>
+    Albers: ${lenAlbers.toFixed(3)} (${eAlb.pct.toFixed(2)}%)<br>
+    Web Mercator: ${lenMerc.toFixed(3)} (${eMerc.pct.toFixed(2)}%)
   </div>
 
   <div class="result">
     <b>Buffer Area (km²)</b><br>
-    WGS84: ${geoArea.toFixed(1)}<br>
-    Web Mercator: ${mercArea.toFixed(1)}<br>
-    CA Statewide: ${caArea.toFixed(1)}
+    ✅ Albers (Equal Area): ${areaAlbers.toFixed(1)} (baseline)<br>
+    State Plane: ${areaSP.toFixed(1)} (${aSP.pct.toFixed(2)}%)<br>
+    UTM 26910: ${areaUTM.toFixed(1)} (${aUTM.pct.toFixed(2)}%)<br>
+    CA Statewide: ${areaCA.toFixed(1)} (${aCA.pct.toFixed(2)}%)<br>
+    Web Mercator: ${areaMerc.toFixed(1)} (${aMerc.pct.toFixed(2)}%)
   </div>
 
   `;
-
 }
 
 </script>
