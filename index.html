@@ -52,7 +52,17 @@ let points = [];
 function enableDrawing() {
   drawing = true;
   points = [];
+
   if (drawnLine) map.removeLayer(drawnLine);
+
+  // ✅ Disable map interactions while drawing
+  map.dragging.disable();
+  map.doubleClickZoom.disable();
+  map.scrollWheelZoom.disable();
+  map.boxZoom.disable();
+  map.keyboard.disable();
+
+  map.getContainer().style.cursor = "crosshair";
 }
 
 // --- Capture clicks
@@ -132,6 +142,16 @@ function runAnalysis() {
   }
 
   const line4326 = turf.lineString(points);
+  
+// ✅ Re-enable map interaction
+map.dragging.enable();
+map.doubleClickZoom.enable();
+map.scrollWheelZoom.enable();
+map.boxZoom.enable();
+map.keyboard.enable();
+
+drawing = false;
+map.getContainer().style.cursor = "";
 
   // --- Determine best State Plane zone (based on centroid)
   const centroid = turf.centroid(line4326);
