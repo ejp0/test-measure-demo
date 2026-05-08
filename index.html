@@ -31,11 +31,12 @@
   <h3>Projection Comparison</h3>
 
   <p style="font-size: 12px; color: #555;">
-    Measurements differ because projections optimize different properties.
-    State Plane is best for local distance. Albers is best for area.
+    Measurements vary because each projection optimizes different properties.<br>
+    State Plane is best for local distances. Equal-area (Albers) is best for area.
   </p>
 
-  <button onclick="enableDrawing()">Draw Line</button>
+  <button onclick="startLine()">Draw Line</button>
+  <button onclick="startPolygon()">Draw Polygon</button>
   <button onclick="finishDrawing()">Finish Drawing</button>
   <button onclick="runAnalysis()">Run Analysis</button>
 
@@ -50,19 +51,28 @@ const map = L.map('map').setView([37, -120], 6);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
   .addTo(map);
 
-let drawnLine = null;
+// --- Drawing state
 let drawing = false;
+let mode = null; // "line" or "polygon"
 let points = [];
+let drawnShape = null;
 
 // --- Drawing controls
-function enableDrawing() {
+function startLine() {
+  mode = "line";
+  resetDrawing();
+}
+
+function startPolygon() {
+  mode = "polygon";
+  resetDrawing();
+}
+
+function resetDrawing() {
   drawing = true;
   points = [];
 
-  if (drawnLine) {
-    map.removeLayer(drawnLine);
-    drawnLine = null;
-  }
+  if (drawnShape) map.removeLayer(drawnShape);
 
   map.getContainer().style.cursor = "crosshair";
 }
@@ -72,7 +82,7 @@ function finishDrawing() {
   map.getContainer().style.cursor = "";
 }
 
-// --- Click capture
+// --- Click handler
 map.on('click', function(e) {
 
   if (!drawing) return;
@@ -82,136 +92,9 @@ map.on('click', function(e) {
 
   points.push([lng, lat]);
 
-  if (drawnLine) {
-    map.removeLayer(drawnLine);
-  }
+  if (drawnShape) map.removeLayer(drawnShape);
 
-  drawnLine = L.polyline(points.map(p => [p[1], p[0]]), {
-    color: "red",
-    weight: 3
-  }).addTo(map);
-
-});
-
-// --- Projection definitions
-
-const wgs84 = 'EPSG:4326';
-
-// UTM Zone 10
-proj4.defs("EPSG:26910",
-  "+proj=utm +zone=10 +datum=NAD83 +units=m +no_defs"
-);
-
-// CA Albers (Equal Area)
-proj4.defs("EPSG:3310",
-  "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 " +
-  "+x_0=0 +y_0=-4000000 +datum=NAD83 +units=m +no_defs"
-);
-
-// CA Statewide LCC
-proj4.defs("CA_LCC",
-  "+proj=lcc +lat_1=34 +lat_2=40.5 +lat_0=36 +lon_0=-120 " +
-  "+x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
-);
-
-// --- Simplified State Plane selector
-function getStatePlaneZone(lat) {
-  if (lat > 40) return { name: "Zone 1", cm: -122 };
-  if (lat > 37.5) return { name: "Zone 2", cm: -122 };
-  if (lat > 35.5) return { name: "Zone 3", cm: -120.5 };
-  if (lat > 34) return { name: "Zone 4", cm: -119 };
-  if (lat > 33) return { name: "Zone 5", cm: -118 };
-  return { name: "Zone 6", cm: -117 };
-}
-
-// --- Helpers
-function projectCoords(coords, from, to) {
-  return coords.map(c => proj4(from, to, c));
-}
-
-function measureLength(line) {
-  return turf.length(line, { units: "kilometers" });
-}
-
-function bufferArea(line) {
-  const buffer = turf.buffer(line, 10, { units: "kilometers" });
-  return turf.area(buffer) / 1e6;
-}
-
-function calcError(val, base) {
-  return ((val - base) / base) * 100;
-}
-
-// --- Analysis
-function runAnalysis() {
-
-  if (points.length < 2) {
-    alert("Draw a line first.");
-    return;
-  }
-
-  const line4326 = turf.lineString(points);
-
-  // --- Get best State Plane zone
-  const centroid = turf.centroid(line4326);
-  const lat = centroid.geometry.coordinates[1];
-  const spZone = getStatePlaneZone(lat);
-
-  const spProj =
-    `+proj=lcc +lat_1=34 +lat_2=36.5 +lat_0=33 ` +
-    `+lon_0=${spZone.cm} +datum=NAD83 +units=m +no_defs`;
-
-  // --- Reproject
-  const lineSP = turf.lineString(projectCoords(points, wgs84, spProj));
-  const lineUTM = turf.lineString(projectCoords(points, wgs84, "EPSG:26910"));
-  const lineCA = turf.lineString(projectCoords(points, wgs84, "CA_LCC"));
-  const lineAlb = turf.lineString(projectCoords(points, wgs84, "EPSG:3310"));
-
-  // Mercator (for comparison)
-  const lineMerc = turf.lineString(projectCoords(points, wgs84, "EPSG:3857"));
-
-  // --- Distance baseline
-  const dSP = measureLength(lineSP);
-
-  // --- Distances
-  const dUTM = measureLength(lineUTM);
-  const dCA = measureLength(lineCA);
-  const dAlb = measureLength(lineAlb);
-  const dMerc = measureLength(lineMerc);
-
-  // --- Area baseline (Albers)
-  const aAlb = bufferArea(lineAlb);
-
-  const aSP = bufferArea(lineSP);
-  const aUTM = bufferArea(lineUTM);
-  const aCA = bufferArea(lineCA);
-  const aMerc = bufferArea(lineMerc);
-
-  // --- Output
-  document.getElementById("results").innerHTML = `
-
-  <div class="result">
-    <b>Distance (km)</b><br>
-    ✅ State Plane (${spZone.name}): ${dSP.toFixed(3)} (baseline)<br>
-    UTM 26910: ${dUTM.toFixed(3)} (${calcError(dUTM, dSP).toFixed(2)}%)<br>
-    CA Statewide: ${dCA.toFixed(3)} (${calcError(dCA, dSP).toFixed(2)}%)<br>
-    Albers: ${dAlb.toFixed(3)} (${calcError(dAlb, dSP).toFixed(2)}%)<br>
-    Web Mercator: ${dMerc.toFixed(3)} (${calcError(dMerc, dSP).toFixed(2)}%)
-  </div>
-
-  <div class="result">
-    <b>Buffer Area (km²)</b><br>
-    ✅ Albers: ${aAlb.toFixed(1)} (baseline)<br>
-    State Plane: ${aSP.toFixed(1)} (${calcError(aSP, aAlb).toFixed(2)}%)<br>
-    UTM: ${aUTM.toFixed(1)} (${calcError(aUTM, aAlb).toFixed(2)}%)<br>
-    CA Statewide: ${aCA.toFixed(1)} (${calcError(aCA, aAlb).toFixed(2)}%)<br>
-    Web Mercator: ${aMerc.toFixed(1)} (${calcError(aMerc, aAlb).toFixed(2)}%)
-  </div>
-
-  `;
-}
-
-</script>
-
-</body>
-</html>
+  if (mode === "line") {
+    drawnShape = L.polyline(points.map(p => [p[1], p[0]]), {
+      color: "red",
+      weight: 3
