@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Projection Comparison Tool</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Turf (geometry ops) -->
+  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+
+  <!-- Proj4 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+  <style>
+    body { margin: 0; font-family: Arial; }
+    #map { width: 65%; height: 100vh; float: left; }
+    #panel { width: 35%; height: 100vh; float: right; padding: 10px; overflow: auto; }
+    h3 { margin-top: 0; }
+    .result { margin-bottom: 15px; }
+  </style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+  <h3>Projection Comparison</h3>
+
+  <button onclick="enableDrawing()">Draw Line</button>
+  <button onclick="runAnalysis()">Run Analysis</button>
+
+  <div id="results"></div>
+</div>
+
+<script>
+
+// --- Map setup
+const map = L.map('map').setView([37, -120], 6);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+  .addTo(map);
+
+let drawnLine = null;
+let drawing = false;
+
+// --- Enable drawing
+function enableDrawing() {
+  drawing = true;
+  if (drawnLine) map.removeLayer(drawnLine);
+}
+
+// --- Capture clicks
+let points = [];
+
+map.on('click', e => {
+  if (!drawing) return;
+
+  points.push([e.latlng.lng, e.latlng.lat]);
+
+  if (points.length > 1) {
+    if (drawnLine) map.removeLayer(drawnLine);
+    drawnLine = L.polyline(points.map(p => [p[1], p[0]])).addTo(map);
+  }
+});
+
+// --- Define projections
+
+// WGS84
+const wgs84 = 'EPSG:4326';
+
+// Web Mercator
+const mercator = 'EPSG:3857';
+
+// California statewide LCC (your approximation)
+proj4.defs("CA_LCC",
+  "+proj=lcc +lat_1=34 +lat_2=40.5 +lat_0=36 +lon_0=-120 " +
+  "+x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
+);
+
+// --- Analysis
+function runAnalysis() {
+
+  if (points.length < 2) {
+    alert("Draw a line first.");
+    return;
+  }
+
+  const line = turf.lineString(points);
+
+  // --- 1. Geodesic (truth baseline)
+  const geodesicLength = turf.length(line, {units: 'kilometers'});
+
+  // --- 2. Mercator (planar misuse)
+  const mercLine = turf.toMercator(line);
+  const mercLength = turf.length(mercLine, {units: 'kilometers'});
+
+  // --- 3. CA projection
+  const caCoords = points.map(p => proj4(wgs84, "CA_LCC", p));
+  const caLine = turf.lineString(caCoords);
+
+  const caLength = turf.length(caLine, {units: 'kilometers'});
+
+  // --- Buffers (10 km)
+  const bufferDist = 10;
+
+  const geoBuffer = turf.buffer(line, bufferDist, {units: 'kilometers'});
+  const mercBuffer = turf.buffer(mercLine, bufferDist, {units: 'kilometers'});
+  const caBuffer = turf.buffer(caLine, bufferDist, {units: 'kilometers'});
+
+  // --- Areas
+  const geoArea = turf.area(geoBuffer) / 1e6; // km²
+  const mercArea = turf.area(mercBuffer) / 1e6;
+  const caArea = turf.area(caBuffer) / 1e6;
+
+  // --- Output
+  document.getElementById("results").innerHTML = `
+
+  <div class="result">
+    <b>Segment Length (km)</b><br>
+    WGS84 (Geodesic): ${geodesicLength.toFixed(3)}<br>
+    Web Mercator: ${mercLength.toFixed(3)}<br>
+    CA Statewide: ${caLength.toFixed(3)}
+  </div>
+
+  <div class="result">
+    <b>Buffer Area (km²)</b><br>
+    WGS84: ${geoArea.toFixed(1)}<br>
+    Web Mercator: ${mercArea.toFixed(1)}<br>
+    CA Statewide: ${caArea.toFixed(1)}
+  </div>
+
+  `;
+
+}
+
+</script>
+
+</body>
+</html>
