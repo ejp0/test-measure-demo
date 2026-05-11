@@ -4,21 +4,28 @@
   <meta charset="utf-8" />
   <title>Projection Comparison Tool</title>
 
-  <!-- ✅ Leaflet (CORRECT) -->
-  <link rel="stylesheet" href="t/leaflet.css
-  https://unpkg.com/leaflet/dist/leaflet.js</script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <!-- ✅ Turf -->
+  <!-- Turf -->
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
-  <!-- ✅ Proj4 -->
+  <!-- Proj4 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
   <style>
-    body { margin:0; font-family: Arial; }
+    body { margin:0; font-family: Arial, sans-serif; }
     #map { width: 65%; height: 100vh; float: left; }
-    #panel { width: 35%; height: 100vh; float: right; padding:10px; }
+    #panel { width: 35%; height: 100vh; float: right; padding: 10px; box-sizing: border-box; overflow: auto; }
     button { display:block; margin-bottom:6px; }
+    #output {
+      margin-top: 12px;
+      padding: 10px;
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      white-space: pre-wrap;
+    }
   </style>
 </head>
 
@@ -34,18 +41,28 @@
   <button onclick="startPoint()">Get Coordinates</button>
   <button onclick="undoPoint()">Undo Last Point</button>
   <button onclick="finishDrawing()">Finish Drawing</button>
+
+  <div id="output">Ready.</div>
 </div>
 
 <script>
 
-// ✅ Confirm scripts loaded
+// Confirm scripts loaded
 console.log("Leaflet loaded:", typeof L);
 console.log("Turf loaded:", typeof turf);
 console.log("Proj4 loaded:", typeof proj4);
 
+const output = document.getElementById("output");
+
+function setOutput(text) {
+  output.textContent = text;
+}
+
 // --- Map
-const map = L.map('map').setView([37,-120], 6);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+const map = L.map('map').setView([37, -120], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
 
 // --- State
 let drawing = false;
@@ -55,87 +72,122 @@ let drawnShape = null;
 let vertexMarkers = [];
 
 // --- Tool selectors
-function startLine(){ mode="line"; reset(); }
-function startPolygon(){ mode="polygon"; reset(); }
-function startPoint(){ mode="point"; reset(); }
+function startLine() {
+  mode = "line";
+  reset();
+  setOutput("Line mode: click on the map to add points.");
+}
+
+function startPolygon() {
+  mode = "polygon";
+  reset();
+  setOutput("Polygon mode: click on the map to add vertices.");
+}
+
+function startPoint() {
+  mode = "point";
+  reset();
+  setOutput("Point mode: click on the map to get coordinates.");
+}
 
 // --- Reset
-function reset(){
+function reset() {
   drawing = true;
   points = [];
 
-  if(drawnShape) map.removeLayer(drawnShape);
-  vertexMarkers.forEach(m=>map.removeLayer(m));
+  if (drawnShape) map.removeLayer(drawnShape);
+  vertexMarkers.forEach(m => map.removeLayer(m));
   vertexMarkers = [];
 
-  map.getContainer().style.cursor="crosshair";
+  map.getContainer().style.cursor = "crosshair";
 }
 
 // --- Finish
-function finishDrawing(){
-  drawing=false;
-  map.getContainer().style.cursor="";
+function finishDrawing() {
+  drawing = false;
+  map.getContainer().style.cursor = "";
+
+  if (mode === "line") {
+    setOutput(`Finished line with ${points.length} point(s).`);
+  } else if (mode === "polygon") {
+    setOutput(`Finished polygon with ${points.length} vertex/vertices.`);
+  } else if (mode === "point") {
+    if (points.length) {
+      const [lng, lat] = points[0];
+      setOutput(`Point selected:\nLatitude: ${lat}\nLongitude: ${lng}`);
+    } else {
+      setOutput("No point selected.");
+    }
+  } else {
+    setOutput("Drawing finished.");
+  }
 }
 
 // --- Undo
-function undoPoint(){
-  if(points.length===0) return;
+function undoPoint() {
+  if (points.length === 0) return;
 
   points.pop();
   const m = vertexMarkers.pop();
-  if(m) map.removeLayer(m);
+  if (m) map.removeLayer(m);
 
   redraw();
+  setOutput(`Removed last point. ${points.length} point(s) remaining.`);
 }
 
 // --- Click handler
-map.on('click', function(e){
-
-  if(!drawing) return;
+map.on('click', function(e) {
+  if (!drawing) return;
 
   const lng = e.latlng.lng;
   const lat = e.latlng.lat;
 
-  if(mode==="point"){
-    points=[[lng,lat]];
+  if (mode === "point") {
+    points = [[lng, lat]];
 
-    if(drawnShape) map.removeLayer(drawnShape);
+    if (drawnShape) map.removeLayer(drawnShape);
 
-    drawnShape = L.circleMarker([lat,lng],{radius:6,color:"green"}).addTo(map);
+    drawnShape = L.circleMarker([lat, lng], { radius: 6, color: "green" }).addTo(map);
+    setOutput(`Point selected:\nLatitude: ${lat}\nLongitude: ${lng}`);
     return;
   }
 
-  points.push([lng,lat]);
+  points.push([lng, lat]);
 
-  const marker = L.circleMarker([lat,lng],{
-    radius:4,color:"black",fillOpacity:1
+  const marker = L.circleMarker([lat, lng], {
+    radius: 4,
+    color: "black",
+    fillOpacity: 1
   }).addTo(map);
 
   vertexMarkers.push(marker);
 
   redraw();
-
+  setOutput(`${mode} mode: ${points.length} point(s) added.`);
 });
 
 // --- Draw geometry
-function redraw(){
+function redraw() {
+  if (drawnShape) map.removeLayer(drawnShape);
 
-  if(drawnShape) map.removeLayer(drawnShape);
-
-  if(mode==="line"){
-    drawnShape = L.polyline(points.map(p=>[p[1],p[0]]),{color:"red"}).addTo(map);
+  if (mode === "line") {
+    drawnShape = L.polyline(
+      points.map(p => [p[1], p[0]]),
+      { color: "red" }
+    ).addTo(map);
   }
 
-  if(mode==="polygon"){
+  if (mode === "polygon") {
+    let pts = [...points];
 
-    let pts=[...points];
-
-    if(points.length>=3){
-      pts=[...points,points[0]];
+    if (points.length >= 3) {
+      pts = [...points, points[0]];
     }
 
-    drawnShape = L.polygon(pts.map(p=>[p[1],p[0]]),
-      {color:"blue",fillOpacity:0.3}).addTo(map);
+    drawnShape = L.polygon(
+      pts.map(p => [p[1], p[0]]),
+      { color: "blue", fillOpacity: 0.3 }
+    ).addTo(map);
   }
 }
 
