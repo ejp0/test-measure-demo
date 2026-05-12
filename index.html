@@ -460,38 +460,35 @@
 
         const rows = [];
 
-        const geodesicMeters = geometryEngine.geodesicLength(line, "meters");
-        rows.push({
+        rows.push(makeMeasurementRow({
           label: "WGS84 / EPSG:4326",
           method: "Geodesic",
-          result: formatNumber(geodesicMeters),
           units: "meters",
-          note: "Esri geometryEngine geodesic length on geographic coordinates."
-        });
+          note: "Esri geometryEngine geodesic length on geographic coordinates.",
+          compute: () => geometryEngine.geodesicLength(line, "meters")
+        }));
 
-        const webMercator = projection.isSupported()
-          ? projection.project(line, SpatialReference.WebMercator)
-          : null;
-        const webMercatorPlanar = webMercator ? geometryEngine.planarLength(webMercator, "meters") : NaN;
-        rows.push({
+        rows.push(makeMeasurementRow({
           label: "Web Mercator / EPSG:3857",
           method: "Planar",
-          result: formatMaybeNumber(webMercatorPlanar),
           units: "meters",
-          note: "Projected with Esri projection module, then measured with planar length."
-        });
+          note: "Projected with Esri projection module when available, then measured with planar length.",
+          compute: () => {
+            const projected = safeProject(line, SpatialReference.WebMercator);
+            return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
+          }
+        }));
 
-        const caZone3 = projection.isSupported()
-          ? projection.project(line, new SpatialReference({ wkid: 2227 }))
-          : null;
-        const caZone3Feet = caZone3 ? geometryEngine.planarLength(caZone3, "feet") : NaN;
-        rows.push({
+        rows.push(makeMeasurementRow({
           label: "NAD83 / California zone 3 (ftUS) / EPSG:2227",
           method: "Planar",
-          result: formatMaybeNumber(caZone3Feet),
           units: "feet",
-          note: "Representative Esri projected CRS row for California comparison."
-        });
+          note: "Representative Esri projected CRS row for California comparison.",
+          compute: () => {
+            const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
+            return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
+          }
+        }));
 
         rows.push({
           label: "EPSG:4430",
@@ -520,15 +517,42 @@
         `).join("");
       }
 
+      function safeProject(geometry, outSpatialReference) {
+        try {
+          return projection.project(geometry, outSpatialReference);
+        } catch (err) {
+          console.warn("Projection failed:", err);
+          return null;
+        }
+      }
+
+      function makeMeasurementRow({ label, method, units, note, compute }) {
+        try {
+          const value = compute();
+          return {
+            label,
+            method,
+            result: Number.isFinite(value) ? formatNumber(value) : "Unable to compute",
+            units,
+            note
+          };
+        } catch (err) {
+          console.warn(`Measurement failed for ${label}:`, err);
+          return {
+            label,
+            method,
+            result: "Unable to compute",
+            units,
+            note: `${note} Error: ${err.message}`
+          };
+        }
+      }
+
       function formatNumber(value) {
         return Number(value).toLocaleString(undefined, {
           maximumFractionDigits: 3,
           minimumFractionDigits: 3
         });
-      }
-
-      function formatMaybeNumber(value) {
-        return Number.isFinite(value) ? formatNumber(value) : "Unable to compute";
       }
 
       function escapeHtml(str) {
