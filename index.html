@@ -154,14 +154,15 @@
           <tr>
             <th>Spatial Reference</th>
             <th>Method</th>
-            <th>Result</th>
+            <th>Result in native unit of measure</th>
+            <th>Result converted to international foot (0.3048 meters)</th>
             <th>Units</th>
             <th>Notes</th>
           </tr>
         </thead>
         <tbody id="resultsBody">
           <tr>
-            <td colspan="5">No line drawn yet.</td>
+            <td colspan="6">No line drawn yet.</td>
           </tr>
         </tbody>
       </table>
@@ -192,6 +193,9 @@
       geometryEngine,
       projection
     ) {
+      const INTERNATIONAL_FOOT_IN_METERS = 0.3048;
+      const US_SURVEY_FOOT_IN_METERS = 0.3048006096012192;
+
       const statusEl = document.getElementById("status");
       const resultsBody = document.getElementById("resultsBody");
       const customCrsStatus = document.getElementById("customCrsStatus");
@@ -443,7 +447,7 @@
 
       async function renderResults() {
         if (mode !== "line" || points.length < 2) {
-          resultsBody.innerHTML = '<tr><td colspan="5">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
+          resultsBody.innerHTML = '<tr><td colspan="6">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
           return;
         }
 
@@ -463,60 +467,71 @@
         rows.push(makeMeasurementRow({
           label: "WGS84 / EPSG:4326",
           method: "Geodesic",
-          units: "meters",
-          note: "Esri geometryEngine geodesic length on geographic coordinates.",
-          compute: () => geometryEngine.geodesicLength(line, "meters")
+          nativeUnitLabel: "NULL",
+          note: "Geodesic length is computed in meters, but EPSG:4326 does not have a native planar linear unit for line length.",
+          compute: () => geometryEngine.geodesicLength(line, "meters"),
+          nativeFormatter: () => "NULL",
+          internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
         rows.push(makeMeasurementRow({
           label: "Web Mercator / EPSG:3857",
           method: "Planar",
-          units: "meters",
+          nativeUnitLabel: "meter",
           note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
           compute: () => {
             const projected = safeProject(line, SpatialReference.WebMercator);
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
-          }
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} m`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
           method: "Planar",
-          units: "meters",
+          nativeUnitLabel: "meter",
           note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 26910 }));
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
-          }
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} m`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
           method: "Planar",
-          units: "feet",
-          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in feet.",
+          nativeUnitLabel: "U.S. survey foot (approx 0.3048006 meters)",
+          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in U.S. survey feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
-          }
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
         }));
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 BLM Zone 10N (US Feet)",
           method: "Planar",
-          units: "feet",
-          note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in feet.",
+          nativeUnitLabel: "U.S. survey foot (approx 0.3048006 meters)",
+          note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in U.S. survey feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
-          }
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
         }));
 
         rows.push({
           label: "Custom CRS",
           method: "Deferred",
-          result: "Not implemented",
-          units: "",
+          nativeResult: "Not implemented",
+          convertedResult: "Not implemented",
+          nativeUnitLabel: "",
           note: "Custom CRS comparison is deferred in this Esri-first rewrite."
         });
 
@@ -524,8 +539,9 @@
           <tr>
             <td>${escapeHtml(row.label)}</td>
             <td>${escapeHtml(row.method)}</td>
-            <td>${escapeHtml(row.result)}</td>
-            <td>${escapeHtml(row.units)}</td>
+            <td>${escapeHtml(row.nativeResult)}</td>
+            <td>${escapeHtml(row.convertedResult)}</td>
+            <td>${escapeHtml(row.nativeUnitLabel)}</td>
             <td>${escapeHtml(row.note)}</td>
           </tr>
         `).join("");
@@ -540,14 +556,26 @@
         }
       }
 
-      function makeMeasurementRow({ label, method, units, note, compute }) {
+      function makeMeasurementRow({ label, method, nativeUnitLabel, note, compute, nativeFormatter, internationalFootFormatter }) {
         try {
           const value = compute();
+          if (!Number.isFinite(value)) {
+            return {
+              label,
+              method,
+              nativeResult: "Unable to compute",
+              convertedResult: "Unable to compute",
+              nativeUnitLabel,
+              note
+            };
+          }
+
           return {
             label,
             method,
-            result: Number.isFinite(value) ? formatNumber(value) : "Unable to compute",
-            units,
+            nativeResult: nativeFormatter(value),
+            convertedResult: internationalFootFormatter(value),
+            nativeUnitLabel,
             note
           };
         } catch (err) {
@@ -555,11 +583,21 @@
           return {
             label,
             method,
-            result: "Unable to compute",
-            units,
+            nativeResult: "Unable to compute",
+            convertedResult: "Unable to compute",
+            nativeUnitLabel,
             note: `${note} Error: ${err.message}`
           };
         }
+      }
+
+      function formatInternationalFeetFromMeters(valueInMeters) {
+        return `${formatNumber(valueInMeters / INTERNATIONAL_FOOT_IN_METERS)} intl ft`;
+      }
+
+      function formatInternationalFeetFromUsSurveyFeet(valueInUsSurveyFeet) {
+        const meters = valueInUsSurveyFeet * US_SURVEY_FOOT_IN_METERS;
+        return `${formatNumber(meters / INTERNATIONAL_FOOT_IN_METERS)} intl ft`;
       }
 
       function formatNumber(value) {
