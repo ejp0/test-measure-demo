@@ -480,6 +480,17 @@
         }));
 
         rows.push(makeMeasurementRow({
+          label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
+          method: "Planar",
+          units: "meters",
+          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
+          compute: () => {
+            const projected = safeProject(line, new SpatialReference({ wkid: 26910 }));
+            return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
+          }
+        }));
+
+        rows.push(makeMeasurementRow({
           label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
           method: "Planar",
           units: "feet",
