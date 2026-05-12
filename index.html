@@ -112,6 +112,11 @@
       color: #475569;
     }
 
+    .sr-name {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
     .mono {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -156,13 +161,12 @@
             <th>Method</th>
             <th>Result in native unit of measure</th>
             <th>Result converted to international foot (0.3048 meters)</th>
-            <th>Units</th>
             <th>Notes</th>
           </tr>
         </thead>
         <tbody id="resultsBody">
           <tr>
-            <td colspan="6">No line drawn yet.</td>
+            <td colspan="5">No line drawn yet.</td>
           </tr>
         </tbody>
       </table>
@@ -447,7 +451,7 @@
 
       async function renderResults() {
         if (mode !== "line" || points.length < 2) {
-          resultsBody.innerHTML = '<tr><td colspan="6">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
+          resultsBody.innerHTML = '<tr><td colspan="5">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
           return;
         }
 
@@ -466,8 +470,8 @@
 
         rows.push(makeMeasurementRow({
           label: "WGS84 / EPSG:4326",
+          spatialReferenceUnitOfMeasure: "degrees",
           method: "Geodesic",
-          nativeUnitLabel: "NULL",
           note: "Geodesic length is computed in meters, but EPSG:4326 does not have a native planar linear unit for line length.",
           compute: () => geometryEngine.geodesicLength(line, "meters"),
           nativeFormatter: () => "NULL",
@@ -476,8 +480,8 @@
 
         rows.push(makeMeasurementRow({
           label: "Web Mercator / EPSG:3857",
+          spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          nativeUnitLabel: "meter",
           note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
           compute: () => {
             const projected = safeProject(line, SpatialReference.WebMercator);
@@ -489,8 +493,8 @@
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
+          spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          nativeUnitLabel: "meter",
           note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 26910 }));
@@ -502,8 +506,8 @@
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
+          spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
           method: "Planar",
-          nativeUnitLabel: "U.S. survey foot (approx 0.3048006 meters)",
           note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in U.S. survey feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
@@ -515,8 +519,8 @@
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 BLM Zone 10N (US Feet)",
+          spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
           method: "Planar",
-          nativeUnitLabel: "U.S. survey foot (approx 0.3048006 meters)",
           note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in U.S. survey feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
@@ -527,24 +531,26 @@
         }));
 
         rows.push({
-          label: "Custom CRS",
+          spatialReferenceCell: `${buildSpatialReferenceCell("Custom CRS", "Not implemented")}`,
           method: "Deferred",
           nativeResult: "Not implemented",
           convertedResult: "Not implemented",
-          nativeUnitLabel: "",
           note: "Custom CRS comparison is deferred in this Esri-first rewrite."
         });
 
         resultsBody.innerHTML = rows.map(row => `
           <tr>
-            <td>${escapeHtml(row.label)}</td>
+            <td>${row.spatialReferenceCell}</td>
             <td>${escapeHtml(row.method)}</td>
             <td>${escapeHtml(row.nativeResult)}</td>
             <td>${escapeHtml(row.convertedResult)}</td>
-            <td>${escapeHtml(row.nativeUnitLabel)}</td>
             <td>${escapeHtml(row.note)}</td>
           </tr>
         `).join("");
+      }
+
+      function buildSpatialReferenceCell(label, unitOfMeasure) {
+        return `<div class="sr-name">${escapeHtml(label)}</div><div class="small">Unit of Measure: ${escapeHtml(unitOfMeasure)}</div>`;
       }
 
       function safeProject(geometry, outSpatialReference) {
@@ -556,36 +562,33 @@
         }
       }
 
-      function makeMeasurementRow({ label, method, nativeUnitLabel, note, compute, nativeFormatter, internationalFootFormatter }) {
+      function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, note, compute, nativeFormatter, internationalFootFormatter }) {
         try {
           const value = compute();
           if (!Number.isFinite(value)) {
             return {
-              label,
+              spatialReferenceCell: buildSpatialReferenceCell(label, spatialReferenceUnitOfMeasure),
               method,
               nativeResult: "Unable to compute",
               convertedResult: "Unable to compute",
-              nativeUnitLabel,
               note
             };
           }
 
           return {
-            label,
+            spatialReferenceCell: buildSpatialReferenceCell(label, spatialReferenceUnitOfMeasure),
             method,
             nativeResult: nativeFormatter(value),
             convertedResult: internationalFootFormatter(value),
-            nativeUnitLabel,
             note
           };
         } catch (err) {
           console.warn(`Measurement failed for ${label}:`, err);
           return {
-            label,
+            spatialReferenceCell: buildSpatialReferenceCell(label, spatialReferenceUnitOfMeasure),
             method,
             nativeResult: "Unable to compute",
             convertedResult: "Unable to compute",
-            nativeUnitLabel,
             note: `${note} Error: ${err.message}`
           };
         }
