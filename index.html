@@ -490,13 +490,16 @@
           }
         }));
 
-        rows.push({
-          label: "EPSG:4430",
-          method: "Deferred",
-          result: "Not implemented",
-          units: "",
-          note: "Left intentionally unimplemented until the authoritative EPSG:4430 handling is verified in the Esri SDK workflow."
-        });
+        rows.push(makeMeasurementRow({
+          label: "NAD 1983 BLM Zone 10N (US Feet)",
+          method: "Planar",
+          units: "feet",
+          note: "Based on the ArcGIS Pro WKT for NAD_1983_BLM_Zone_10N; using WKID 4430 as a tested Esri projection candidate.",
+          compute: () => {
+            const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
+            return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
+          }
+        }));
 
         rows.push({
           label: "Custom CRS",
