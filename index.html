@@ -50,6 +50,27 @@
       margin-bottom: 12px;
     }
 
+    .layer-toggles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+
+    .layer-toggles label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.88rem;
+      color: #475569;
+      cursor: pointer;
+    }
+
     button {
       padding: 8px 10px;
       border: 1px solid #cbd5e1;
@@ -132,11 +153,19 @@
 
       <div class="controls">
         <button id="drawLineBtn">Draw Line</button>
-        <!-- <button id="drawPolygonBtn">Draw Polygon</button> -->
-        <!-- <button id="getCoordsBtn">Get Coordinates</button> -->
         <button id="undoBtn">Undo Last Point</button>
-        <!-- <button id="finishBtn">Finish Drawing</button> -->
         <button id="clearBtn">Clear</button>
+      </div>
+
+      <div class="layer-toggles">
+        <label>
+          <input type="checkbox" id="toggleStatePlane" checked />
+          California State Plane zones
+        </label>
+        <label>
+          <input type="checkbox" id="toggleUtm" checked />
+          UTM zone boundaries
+        </label>
       </div>
 
       <h3>Line measurement comparison</h3>
@@ -160,7 +189,7 @@
       <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
 
       <div class="note">
-        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
+        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, geometry operations.
         The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
       </div>
 
@@ -180,8 +209,8 @@
       "esri/views/MapView",
       "esri/Graphic",
       "esri/layers/GraphicsLayer",
+      "esri/layers/FeatureLayer",
       "esri/geometry/Polyline",
-      "esri/geometry/Polygon",
       "esri/geometry/Point",
       "esri/geometry/SpatialReference",
       "esri/geometry/geometryEngine",
@@ -191,8 +220,8 @@
       MapView,
       Graphic,
       GraphicsLayer,
+      FeatureLayer,
       Polyline,
-      Polygon,
       Point,
       SpatialReference,
       geometryEngine,
@@ -208,11 +237,53 @@
       const undoBtn = document.getElementById("undoBtn");
       const clearBtn = document.getElementById("clearBtn");
       const applyCustomBtn = document.getElementById("applyCustomBtn");
+      const toggleStatePlaneEl = document.getElementById("toggleStatePlane");
+      const toggleUtmEl = document.getElementById("toggleUtm");
 
       const graphicsLayer = new GraphicsLayer();
+
+      const statePlaneLayer = new FeatureLayer({
+        url: "https://services.arcgis.com/V6ZHFr6zdgNZuVG0/arcgis/rest/services/State_Plane_Zones/FeatureServer/0",
+        title: "California State Plane zones",
+        definitionExpression: "STATE_ABBR = 'CA'",
+        opacity: 0.45,
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-fill",
+            color: [0, 0, 0, 0],
+            outline: {
+              color: [194, 120, 3, 0.9],
+              width: 1.5,
+              style: "dash"
+            }
+          }
+        },
+        visible: true
+      });
+
+      const utmLayer = new FeatureLayer({
+        url: "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/World_UTM_Grid/FeatureServer/0",
+        title: "UTM zone boundaries",
+        opacity: 0.35,
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-fill",
+            color: [0, 0, 0, 0],
+            outline: {
+              color: [37, 99, 235, 0.75],
+              width: 1,
+              style: "short-dot"
+            }
+          }
+        },
+        visible: true
+      });
+
       const map = new Map({
         basemap: "topo-vector",
-        layers: [graphicsLayer]
+        layers: [utmLayer, statePlaneLayer, graphicsLayer]
       });
 
       const view = new MapView({
@@ -232,6 +303,12 @@
       undoBtn.addEventListener("click", undoPoint);
       clearBtn.addEventListener("click", clearAll);
       applyCustomBtn.addEventListener("click", applyCustomCRS);
+      toggleStatePlaneEl.addEventListener("change", function() {
+        statePlaneLayer.visible = toggleStatePlaneEl.checked;
+      });
+      toggleUtmEl.addEventListener("change", function() {
+        utmLayer.visible = toggleUtmEl.checked;
+      });
 
       view.on("click", function(event) {
         if (!drawing) return;
