@@ -472,7 +472,7 @@
           label: "Web Mercator / EPSG:3857",
           method: "Planar",
           units: "meters",
-          note: "Projected with Esri projection module when available, then measured with planar length.",
+          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
           compute: () => {
             const projected = safeProject(line, SpatialReference.WebMercator);
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
@@ -480,10 +480,10 @@
         }));
 
         rows.push(makeMeasurementRow({
-          label: "NAD83 / California zone 3 (ftUS) / EPSG:2227",
+          label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
           method: "Planar",
           units: "feet",
-          note: "Representative Esri projected CRS row for California comparison.",
+          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
@@ -494,7 +494,7 @@
           label: "NAD 1983 BLM Zone 10N (US Feet)",
           method: "Planar",
           units: "feet",
-          note: "Based on the ArcGIS Pro WKT for NAD_1983_BLM_Zone_10N; using WKID 4430 as a tested Esri projection candidate.",
+          note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
