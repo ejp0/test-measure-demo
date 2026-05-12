@@ -65,6 +65,7 @@
     .status,
     .note,
     .custom-crs {
+      margin-top: 12px;
       margin-bottom: 12px;
       padding: 10px;
       background: white;
@@ -138,21 +139,6 @@
         <button id="clearBtn">Clear</button>
       </div>
 
-      <div class="note">
-        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
-        The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
-      </div>
-
-      <div class="custom-crs">
-        <h3>Custom CRS definition</h3>
-        <div class="small">Custom Proj4-style CRS input is preserved as a placeholder for future comparison work, but custom client-side reprojection is not wired in this Esri-first version.</div>
-        <textarea id="customProjText" placeholder="Future enhancement: custom CRS definition support"></textarea>
-        <button id="applyCustomBtn">Apply Custom CRS</button>
-        <div id="customCrsStatus" class="small" style="margin-top:8px;">Custom CRS is not active in this version.</div>
-      </div>
-
-      <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
-
       <h3>Line measurement comparison</h3>
       <table>
         <thead>
@@ -170,6 +156,21 @@
           </tr>
         </tbody>
       </table>
+
+      <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
+
+      <div class="note">
+        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
+        The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
+      </div>
+
+      <div class="custom-crs">
+        <h3>Custom CRS definition</h3>
+        <div class="small">Custom Proj4-style CRS input is preserved as a placeholder for future comparison work, but custom client-side reprojection is not wired in this Esri-first version.</div>
+        <textarea id="customProjText" placeholder="Future enhancement: custom CRS definition support"></textarea>
+        <button id="applyCustomBtn">Apply Custom CRS</button>
+        <div id="customCrsStatus" class="small" style="margin-top:8px;">Custom CRS is not active in this version.</div>
+      </div>
     </div>
   </div>
 
