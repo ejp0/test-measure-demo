@@ -15,183 +15,593 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
   <style>
-    body { margin:0; font-family: Arial, sans-serif; }
-    #map { width: 65%; height: 100vh; float: left; }
-    #panel { width: 35%; height: 100vh; float: right; padding: 10px; box-sizing: border-box; overflow: auto; }
-    button { display:block; margin-bottom:6px; }
-    #output {
-      margin-top: 12px;
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #1f2937;
+    }
+
+    #map {
+      width: 65%;
+      height: 100vh;
+      float: left;
+    }
+
+    #panel {
+      width: 35%;
+      height: 100vh;
+      float: right;
+      padding: 12px;
+      box-sizing: border-box;
+      overflow: auto;
+      background: #fafafa;
+      border-left: 1px solid #ddd;
+    }
+
+    h2, h3 {
+      margin-top: 0;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    button {
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      background: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #f8fafc;
+    }
+
+    .status,
+    .note,
+    .custom-crs {
+      margin-bottom: 12px;
       padding: 10px;
-      background: #f5f5f5;
+      background: white;
       border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+
+    .status {
       white-space: pre-wrap;
+    }
+
+    .note {
+      font-size: 0.95rem;
+      line-height: 1.4;
+    }
+
+    .custom-crs textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 120px;
+      font-family: monospace;
+      margin-top: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 0.92rem;
+    }
+
+    th {
+      background: #f3f4f6;
+    }
+
+    .small {
+      font-size: 0.85rem;
+      color: #475569;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
   </style>
 </head>
 
 <body>
+  <div id="map"></div>
 
-<div id="map"></div>
+  <div id="panel">
+    <h2>Projection Comparison Tool</h2>
 
-<div id="panel">
-  <h3>Projection Tool</h3>
+    <div class="controls">
+      <button onclick="startLine()">Draw Line</button>
+      <button onclick="startPolygon()">Draw Polygon</button>
+      <button onclick="startPoint()">Get Coordinates</button>
+      <button onclick="undoPoint()">Undo Last Point</button>
+      <button onclick="finishDrawing()">Finish Drawing</button>
+      <button onclick="clearAll()">Clear</button>
+    </div>
 
-  <button onclick="startLine()">Draw Line</button>
-  <button onclick="startPolygon()">Draw Polygon</button>
-  <button onclick="startPoint()">Get Coordinates</button>
-  <button onclick="undoPoint()">Undo Last Point</button>
-  <button onclick="finishDrawing()">Finish Drawing</button>
+    <div class="note">
+      Geographic coordinates in <span class="mono">EPSG:4326</span> are appropriate for display and interchange, but not for most planar calculations.
+      This tool compares a geodesic measurement in <span class="mono">EPSG:4326</span> with planar measurements from projected coordinate systems.
+    </div>
 
-  <div id="output">Ready.</div>
-</div>
+    <div class="custom-crs">
+      <h3>Custom CRS definition</h3>
+      <div class="small">Paste a Proj4 definition here for a non-EPSG spatial reference. Example: <span class="mono">+proj=lcc +lat_1=36 +lat_2=38 +lat_0=35 +lon_0=-120 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs</span></div>
+      <textarea id="customProjText">+proj=lcc +lat_1=36 +lat_2=38 +lat_0=35 +lon_0=-120 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs</textarea>
+      <button onclick="applyCustomCRS()">Apply Custom CRS</button>
+      <div id="customCrsStatus" class="small" style="margin-top:8px;">Custom CRS loaded as <span class="mono">CUSTOM:1</span>.</div>
+    </div>
+
+    <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
+
+    <h3>Line measurement comparison</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Spatial Reference</th>
+          <th>Method</th>
+          <th>Result</th>
+          <th>Units</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody">
+        <tr>
+          <td colspan="5">No line drawn yet.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
 <script>
+  console.log("Leaflet loaded:", typeof L);
+  console.log("Turf loaded:", typeof turf);
+  console.log("Proj4 loaded:", typeof proj4);
 
-// Confirm scripts loaded
-console.log("Leaflet loaded:", typeof L);
-console.log("Turf loaded:", typeof turf);
-console.log("Proj4 loaded:", typeof proj4);
+  const statusEl = document.getElementById("status");
+  const resultsBody = document.getElementById("resultsBody");
+  const customProjText = document.getElementById("customProjText");
+  const customCrsStatus = document.getElementById("customCrsStatus");
 
-const output = document.getElementById("output");
-
-function setOutput(text) {
-  output.textContent = text;
-}
-
-// --- Map
-const map = L.map('map').setView([37, -120], 6);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
-
-// --- State
-let drawing = false;
-let mode = null;
-let points = [];
-let drawnShape = null;
-let vertexMarkers = [];
-
-// --- Tool selectors
-function startLine() {
-  mode = "line";
-  reset();
-  setOutput("Line mode: click on the map to add points.");
-}
-
-function startPolygon() {
-  mode = "polygon";
-  reset();
-  setOutput("Polygon mode: click on the map to add vertices.");
-}
-
-function startPoint() {
-  mode = "point";
-  reset();
-  setOutput("Point mode: click on the map to get coordinates.");
-}
-
-// --- Reset
-function reset() {
-  drawing = true;
-  points = [];
-
-  if (drawnShape) map.removeLayer(drawnShape);
-  vertexMarkers.forEach(m => map.removeLayer(m));
-  vertexMarkers = [];
-
-  map.getContainer().style.cursor = "crosshair";
-}
-
-// --- Finish
-function finishDrawing() {
-  drawing = false;
-  map.getContainer().style.cursor = "";
-
-  if (mode === "line") {
-    setOutput(`Finished line with ${points.length} point(s).`);
-  } else if (mode === "polygon") {
-    setOutput(`Finished polygon with ${points.length} vertex/vertices.`);
-  } else if (mode === "point") {
-    if (points.length) {
-      const [lng, lat] = points[0];
-      setOutput(`Point selected:\nLatitude: ${lat}\nLongitude: ${lng}`);
-    } else {
-      setOutput("No point selected.");
-    }
-  } else {
-    setOutput("Drawing finished.");
-  }
-}
-
-// --- Undo
-function undoPoint() {
-  if (points.length === 0) return;
-
-  points.pop();
-  const m = vertexMarkers.pop();
-  if (m) map.removeLayer(m);
-
-  redraw();
-  setOutput(`Removed last point. ${points.length} point(s) remaining.`);
-}
-
-// --- Click handler
-map.on('click', function(e) {
-  if (!drawing) return;
-
-  const lng = e.latlng.lng;
-  const lat = e.latlng.lat;
-
-  if (mode === "point") {
-    points = [[lng, lat]];
-
-    if (drawnShape) map.removeLayer(drawnShape);
-
-    drawnShape = L.circleMarker([lat, lng], { radius: 6, color: "green" }).addTo(map);
-    setOutput(`Point selected:\nLatitude: ${lat}\nLongitude: ${lng}`);
-    return;
-  }
-
-  points.push([lng, lat]);
-
-  const marker = L.circleMarker([lat, lng], {
-    radius: 4,
-    color: "black",
-    fillOpacity: 1
+  const map = L.map('map').setView([37, -120], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
 
-  vertexMarkers.push(marker);
+  let drawing = false;
+  let mode = null;
+  let points = [];
+  let drawnShape = null;
+  let vertexMarkers = [];
+  let customCRSCode = "CUSTOM:1";
 
-  redraw();
-  setOutput(`${mode} mode: ${points.length} point(s) added.`);
-});
+  const CALIFORNIA_STATE_PLANES = [
+    {
+      label: "California State Plane Zone 1 (NAD83 / ftUS)",
+      code: "CA_ZONE_1",
+      units: "US survey ft",
+      lonMin: -125.0,
+      lonMax: -122.0,
+      proj4: "+proj=lcc +lat_1=40 +lat_2=41.66666666666666 +lat_0=39.33333333333334 +lon_0=-122 +x_0=2000000.0001016 +y_0=500000.0001016001 +datum=NAD83 +units=us-ft +no_defs"
+    },
+    {
+      label: "California State Plane Zone 2 (NAD83 / ftUS)",
+      code: "CA_ZONE_2",
+      units: "US survey ft",
+      lonMin: -122.0,
+      lonMax: -119.5,
+      proj4: "+proj=lcc +lat_1=38.33333333333334 +lat_2=39.83333333333334 +lat_0=37.66666666666666 +lon_0=-122 +x_0=2000000.0001016 +y_0=500000.0001016001 +datum=NAD83 +units=us-ft +no_defs"
+    },
+    {
+      label: "California State Plane Zone 3 (NAD83 / ftUS)",
+      code: "CA_ZONE_3",
+      units: "US survey ft",
+      lonMin: -122.0,
+      lonMax: -117.5,
+      proj4: "+proj=lcc +lat_1=37.06666666666667 +lat_2=38.43333333333333 +lat_0=36.5 +lon_0=-120.5 +x_0=2000000.0001016 +y_0=500000.0001016001 +datum=NAD83 +units=us-ft +no_defs"
+    },
+    {
+      label: "California State Plane Zone 4 (NAD83 / ftUS)",
+      code: "CA_ZONE_4",
+      units: "US survey ft",
+      lonMin: -119.5,
+      lonMax: -116.0,
+      proj4: "+proj=lcc +lat_1=36 +lat_2=37.25 +lat_0=35.33333333333334 +lon_0=-119 +x_0=2000000.0001016 +y_0=500000.0001016001 +datum=NAD83 +units=us-ft +no_defs"
+    },
+    {
+      label: "California State Plane Zone 5 (NAD83 / ftUS)",
+      code: "CA_ZONE_5",
+      units: "US survey ft",
+      lonMin: -119.5,
+      lonMax: -114.0,
+      proj4: "+proj=lcc +lat_1=34.03333333333333 +lat_2=35.46666666666667 +lat_0=33.5 +lon_0=-118 +x_0=2000000.0001016 +y_0=500000.0001016001 +datum=NAD83 +units=us-ft +no_defs"
+    },
+    {
+      label: "California State Plane Zone 6 (NAD83 / ftUS)",
+      code: "CA_ZONE_6",
+      units: "US survey ft",
+      lonMin: -118.5,
+      lonMax: -114.0,
+      proj4: "+proj=lcc +lat_1=32.78333333333333 +lat_2=33.88333333333333 +lat_0=32.16666666666666 +lon_0=-116.25 +x_0=2000000.0001016 +y_0=500000.0001016001 +datum=NAD83 +units=us-ft +no_defs"
+    }
+  ];
 
-// --- Draw geometry
-function redraw() {
-  if (drawnShape) map.removeLayer(drawnShape);
+  ensureDefinitions();
 
-  if (mode === "line") {
-    drawnShape = L.polyline(
-      points.map(p => [p[1], p[0]]),
-      { color: "red" }
-    ).addTo(map);
+  function ensureDefinitions() {
+    try {
+      proj4.defs("EPSG:26910", "+proj=utm +zone=10 +datum=NAD83 +units=m +no_defs");
+    } catch (e) {}
+
+    try {
+      proj4.defs("EPSG:3857", "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs");
+    } catch (e) {}
+
+    try {
+      proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+    } catch (e) {}
+
+    try {
+      proj4.defs("EPSG:4430", "+proj=lcc +lat_1=37.06666666666667 +lat_2=38.43333333333333 +lat_0=36.5 +lon_0=-120.5 +x_0=2000000 +y_0=500000 +datum=NAD83 +units=us-ft +no_defs");
+    } catch (e) {}
+
+    CALIFORNIA_STATE_PLANES.forEach(zone => {
+      try {
+        proj4.defs(zone.code, zone.proj4);
+      } catch (e) {}
+    });
+
+    applyCustomCRS();
   }
 
-  if (mode === "polygon") {
-    let pts = [...points];
+  function setStatus(text) {
+    statusEl.textContent = text;
+  }
 
-    if (points.length >= 3) {
-      pts = [...points, points[0]];
+  function startLine() {
+    mode = "line";
+    resetDrawing();
+    setStatus("Line mode active. Click the map to add vertices and compare line measurements across spatial references.");
+    renderResults();
+  }
+
+  function startPolygon() {
+    mode = "polygon";
+    resetDrawing();
+    setStatus("Polygon mode is reserved for future work. For now, use Draw Line to compare projected and geodesic measurements.");
+    renderResults();
+  }
+
+  function startPoint() {
+    mode = "point";
+    resetDrawing();
+    setStatus("Point mode active. Click the map to inspect coordinates.");
+    renderResults();
+  }
+
+  function resetDrawing() {
+    drawing = true;
+    points = [];
+
+    if (drawnShape) {
+      map.removeLayer(drawnShape);
+      drawnShape = null;
     }
 
-    drawnShape = L.polygon(
-      pts.map(p => [p[1], p[0]]),
-      { color: "blue", fillOpacity: 0.3 }
-    ).addTo(map);
+    vertexMarkers.forEach(m => map.removeLayer(m));
+    vertexMarkers = [];
+
+    map.getContainer().style.cursor = "crosshair";
   }
-}
 
+  function clearAll() {
+    drawing = false;
+    mode = null;
+    points = [];
+
+    if (drawnShape) {
+      map.removeLayer(drawnShape);
+      drawnShape = null;
+    }
+
+    vertexMarkers.forEach(m => map.removeLayer(m));
+    vertexMarkers = [];
+
+    map.getContainer().style.cursor = "";
+    setStatus("Cleared. Click “Draw Line” to begin again.");
+    renderResults();
+  }
+
+  function finishDrawing() {
+    drawing = false;
+    map.getContainer().style.cursor = "";
+
+    if (mode === "line") {
+      if (points.length < 2) {
+        setStatus("A line needs at least 2 points.");
+      } else {
+        setStatus(`Finished line with ${points.length} vertices. Review the comparison table for geodesic vs projected results.`);
+      }
+      renderResults();
+      return;
+    }
+
+    if (mode === "point") {
+      if (points.length) {
+        const [lng, lat] = points[0];
+        setStatus(`Point selected.\nLatitude: ${lat.toFixed(6)}\nLongitude: ${lng.toFixed(6)}`);
+      } else {
+        setStatus("No point selected.");
+      }
+      return;
+    }
+
+    if (mode === "polygon") {
+      setStatus("Polygon mode is not yet wired for area comparison in this version.");
+      return;
+    }
+
+    setStatus("Drawing finished.");
+  }
+
+  function undoPoint() {
+    if (!points.length) return;
+
+    points.pop();
+    const marker = vertexMarkers.pop();
+    if (marker) map.removeLayer(marker);
+
+    redraw();
+
+    if (mode === "line") {
+      if (points.length < 2) {
+        setStatus(`Removed last point. ${points.length} point(s) remain. Add at least 2 points for line comparison.`);
+      } else {
+        setStatus(`Removed last point. ${points.length} vertices remain in the line.`);
+      }
+      renderResults();
+      return;
+    }
+
+    setStatus(`Removed last point. ${points.length} point(s) remain.`);
+  }
+
+  map.on('click', function(e) {
+    if (!drawing) return;
+
+    const lng = e.latlng.lng;
+    const lat = e.latlng.lat;
+
+    if (mode === "point") {
+      points = [[lng, lat]];
+
+      if (drawnShape) map.removeLayer(drawnShape);
+
+      drawnShape = L.circleMarker([lat, lng], { radius: 6, color: "green" }).addTo(map);
+      setStatus(`Point selected.\nLatitude: ${lat.toFixed(6)}\nLongitude: ${lng.toFixed(6)}`);
+      return;
+    }
+
+    points.push([lng, lat]);
+
+    const marker = L.circleMarker([lat, lng], {
+      radius: 4,
+      color: "black",
+      fillOpacity: 1
+    }).addTo(map);
+
+    vertexMarkers.push(marker);
+
+    redraw();
+
+    if (mode === "line") {
+      setStatus(`Line mode: ${points.length} point(s) added. ${points.length >= 2 ? "Comparison table updated." : "Add one more point to begin measuring."}`);
+      renderResults();
+      return;
+    }
+
+    if (mode === "polygon") {
+      setStatus(`Polygon mode: ${points.length} point(s) added.`);
+      return;
+    }
+  });
+
+  function redraw() {
+    if (drawnShape) {
+      map.removeLayer(drawnShape);
+      drawnShape = null;
+    }
+
+    if (mode === "line" && points.length) {
+      drawnShape = L.polyline(
+        points.map(p => [p[1], p[0]]),
+        { color: "red" }
+      ).addTo(map);
+    }
+
+    if (mode === "polygon" && points.length) {
+      const pts = points.length >= 3 ? [...points, points[0]] : [...points];
+      drawnShape = L.polygon(
+        pts.map(p => [p[1], p[0]]),
+        { color: "blue", fillOpacity: 0.3 }
+      ).addTo(map);
+    }
+  }
+
+  function applyCustomCRS() {
+    const projString = customProjText.value.trim();
+
+    if (!projString) {
+      customCrsStatus.textContent = "Custom CRS definition is empty.";
+      return;
+    }
+
+    try {
+      proj4.defs(customCRSCode, projString);
+      customCrsStatus.innerHTML = 'Custom CRS loaded as <span class="mono">CUSTOM:1</span>.';
+      renderResults();
+    } catch (err) {
+      customCrsStatus.textContent = `Custom CRS error: ${err.message}`;
+    }
+  }
+
+  function renderResults() {
+    if (mode !== "line" || points.length < 2) {
+      resultsBody.innerHTML = '<tr><td colspan="5">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
+      return;
+    }
+
+    const midpoint = getLineMidpoint(points);
+    const statePlaneZone = chooseCaliforniaStatePlane(midpoint);
+
+    const configs = [
+      {
+        label: "EPSG:4326",
+        method: "Geodesic",
+        units: "meters",
+        note: "Geographic CRS; suitable for geodesic display/interchange, not planar processing.",
+        measure: () => turf.length(turf.lineString(points), { units: "meters" })
+      },
+      {
+        label: "EPSG:3857",
+        method: "Planar",
+        units: "meters",
+        note: "Web Mercator; convenient for web display but distorted for measurement.",
+        measure: () => measureProjectedLine(points, "EPSG:3857")
+      },
+      {
+        label: "EPSG:26910",
+        method: "Planar",
+        units: "meters",
+        note: "UTM Zone 10N.",
+        measure: () => measureProjectedLine(points, "EPSG:26910")
+      },
+      {
+        label: "EPSG:4430",
+        method: "Planar",
+        units: "US survey ft",
+        note: "Comparison row using the specified EPSG reference.",
+        measure: () => measureProjectedLine(points, "EPSG:4430")
+      },
+      {
+        label: statePlaneZone ? statePlaneZone.label : "California State Plane (midpoint-based)",
+        method: "Planar",
+        units: statePlaneZone ? statePlaneZone.units : "unknown",
+        note: statePlaneZone
+          ? `Zone selected from line midpoint at ${midpoint[1].toFixed(5)}, ${midpoint[0].toFixed(5)}.`
+          : "No California State Plane zone matched the midpoint.",
+        measure: () => statePlaneZone ? measureProjectedLine(points, statePlaneZone.code) : NaN
+      },
+      {
+        label: "Custom CRS",
+        method: "Planar",
+        units: inferUnitsFromProj4(customProjText.value.trim()),
+        note: "User-defined CRS from Proj4 parameters.",
+        measure: () => measureProjectedLine(points, customCRSCode)
+      }
+    ];
+
+    const rows = configs.map(cfg => {
+      let value;
+      try {
+        value = cfg.measure();
+      } catch (err) {
+        value = NaN;
+      }
+
+      const displayValue = Number.isFinite(value) ? formatNumber(value) : "Unable to compute";
+
+      return `
+        <tr>
+          <td>${escapeHtml(cfg.label)}</td>
+          <td>${escapeHtml(cfg.method)}</td>
+          <td>${displayValue}</td>
+          <td>${escapeHtml(cfg.units)}</td>
+          <td>${escapeHtml(cfg.note)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    resultsBody.innerHTML = rows;
+  }
+
+  function measureProjectedLine(lngLatPoints, targetCRS) {
+    let total = 0;
+
+    for (let i = 1; i < lngLatPoints.length; i++) {
+      const a = proj4("EPSG:4326", targetCRS, lngLatPoints[i - 1]);
+      const b = proj4("EPSG:4326", targetCRS, lngLatPoints[i]);
+      total += euclideanDistance(a, b);
+    }
+
+    return total;
+  }
+
+  function euclideanDistance(a, b) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function getLineMidpoint(linePoints) {
+    const line = turf.lineString(linePoints);
+    const totalKm = turf.length(line, { units: "kilometers" });
+    const midpointFeature = turf.along(line, totalKm / 2, { units: "kilometers" });
+    return midpointFeature.geometry.coordinates;
+  }
+
+  function chooseCaliforniaStatePlane(midpoint) {
+    const lng = midpoint[0];
+    for (const zone of CALIFORNIA_STATE_PLANES) {
+      if (lng >= zone.lonMin && lng < zone.lonMax) {
+        return zone;
+      }
+    }
+
+    if (lng === -114.0) {
+      return CALIFORNIA_STATE_PLANES[CALIFORNIA_STATE_PLANES.length - 1];
+    }
+
+    return null;
+  }
+
+  function inferUnitsFromProj4(projString) {
+    if (!projString) return "unknown";
+    if (projString.includes("+units=us-ft")) return "US survey ft";
+    if (projString.includes("+units=ft")) return "ft";
+    if (projString.includes("+units=m")) return "meters";
+    if (projString.includes("+proj=longlat")) return "degrees";
+    return "projection units";
+  }
+
+  function formatNumber(value) {
+    return value.toLocaleString(undefined, {
+      maximumFractionDigits: 3,
+      minimumFractionDigits: 3
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 </script>
-
 </body>
 </html>
