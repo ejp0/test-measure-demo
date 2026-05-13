@@ -189,7 +189,7 @@
       <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
 
       <div class="note">
-        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
+        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, geometry operations.
         The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
       </div>
 
@@ -247,9 +247,13 @@
       const statePlaneLayer = new MapImageLayer({
         url: "https://waterrightsmaps.waterboards.ca.gov/gisapp/rest/services/eWRIMS/administrative/MapServer",
         title: "California State Plane zones",
+        minScale: 0,
+        maxScale: 0,
         sublayers: [{
           id: 3,
-          visible: true
+          visible: true,
+          minScale: 0,
+          maxScale: 0
         }],
         visible: true
       });
