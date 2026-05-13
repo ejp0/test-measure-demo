@@ -209,7 +209,6 @@
       "esri/views/MapView",
       "esri/Graphic",
       "esri/layers/GraphicsLayer",
-      "esri/layers/MapImageLayer",
       "esri/layers/FeatureLayer",
       "esri/geometry/Polyline",
       "esri/geometry/Point",
@@ -221,7 +220,6 @@
       MapView,
       Graphic,
       GraphicsLayer,
-      MapImageLayer,
       FeatureLayer,
       Polyline,
       Point,
@@ -244,17 +242,23 @@
 
       const graphicsLayer = new GraphicsLayer();
 
-      const statePlaneLayer = new MapImageLayer({
-        url: "https://waterrightsmaps.waterboards.ca.gov/gisapp/rest/services/eWRIMS/administrative/MapServer",
+      const statePlaneLayer = new FeatureLayer({
+        url: "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_State_Plane_Zones_NAD83/FeatureServer/0",
         title: "California State Plane zones",
-        minScale: 0,
-        maxScale: 0,
-        sublayers: [{
-          id: 3,
-          visible: true,
-          minScale: 0,
-          maxScale: 0
-        }],
+        definitionExpression: "ZONENAME LIKE '%California%'",
+        opacity: 0.45,
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-fill",
+            color: [0, 0, 0, 0],
+            outline: {
+              color: [194, 120, 3, 0.9],
+              width: 1.5,
+              style: "dash"
+            }
+          }
+        },
         visible: true
       });
 
