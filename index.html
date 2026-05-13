@@ -189,7 +189,7 @@
       <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
 
       <div class="note">
-        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, geometry operations.
+        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
         The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
       </div>
 
@@ -249,20 +249,7 @@
         title: "California State Plane zones",
         sublayers: [{
           id: 3,
-          visible: true,
-          opacity: 0.55,
-          renderer: {
-            type: "simple",
-            symbol: {
-              type: "simple-fill",
-              color: [0, 0, 0, 0],
-              outline: {
-                color: [194, 120, 3, 0.9],
-                width: 1.5,
-                style: "dash"
-              }
-            }
-          }
+          visible: true
         }],
         visible: true
       });
