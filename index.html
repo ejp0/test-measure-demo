@@ -166,6 +166,10 @@
           <input type="checkbox" id="toggleUtm" checked />
           UTM zone boundaries
         </label>
+        <label>
+          <input type="checkbox" id="toggleSegments" checked />
+          Demo survey segments
+        </label>
       </div>
 
       <h3>Line measurement comparison</h3>
@@ -189,7 +193,7 @@
       <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
 
       <div class="note">
-        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, geometry operations.
+        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
         The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
       </div>
 
@@ -210,6 +214,7 @@
       "esri/Graphic",
       "esri/layers/GraphicsLayer",
       "esri/layers/FeatureLayer",
+      "esri/layers/GeoJSONLayer",
       "esri/geometry/Polyline",
       "esri/geometry/Point",
       "esri/geometry/SpatialReference",
@@ -221,6 +226,7 @@
       Graphic,
       GraphicsLayer,
       FeatureLayer,
+      GeoJSONLayer,
       Polyline,
       Point,
       SpatialReference,
@@ -239,6 +245,7 @@
       const applyCustomBtn = document.getElementById("applyCustomBtn");
       const toggleStatePlaneEl = document.getElementById("toggleStatePlane");
       const toggleUtmEl = document.getElementById("toggleUtm");
+      const toggleSegmentsEl = document.getElementById("toggleSegments");
 
       const graphicsLayer = new GraphicsLayer();
 
@@ -281,9 +288,41 @@
         visible: true
       });
 
+      const demoSegmentsLayer = new GeoJSONLayer({
+        url: "./test_JSON.geojson",
+        title: "Demo survey segments",
+        opacity: 0.95,
+        renderer: {
+          type: "simple",
+          symbol: {
+            type: "simple-line",
+            color: [22, 163, 74, 0.95],
+            width: 3,
+            style: "solid"
+          }
+        },
+        popupTemplate: {
+          title: "{NAME}",
+          content: [
+            {
+              type: "fields",
+              fieldInfos: [
+                { fieldName: "truth_length", label: "Truth length" },
+                { fieldName: "truth_units", label: "Truth units" },
+                { fieldName: "src_length", label: "Source length" },
+                { fieldName: "src_units", label: "Source units" },
+                { fieldName: "geod_length", label: "Geodesic length" },
+                { fieldName: "geod_units", label: "Geodesic units" }
+              ]
+            }
+          ]
+        },
+        visible: true
+      });
+
       const map = new Map({
         basemap: "topo-vector",
-        layers: [utmLayer, statePlaneLayer, graphicsLayer]
+        layers: [utmLayer, statePlaneLayer, demoSegmentsLayer, graphicsLayer]
       });
 
       const view = new MapView({
@@ -308,6 +347,20 @@
       });
       toggleUtmEl.addEventListener("change", function() {
         utmLayer.visible = toggleUtmEl.checked;
+      });
+      toggleSegmentsEl.addEventListener("change", function() {
+        demoSegmentsLayer.visible = toggleSegmentsEl.checked;
+      });
+
+      demoSegmentsLayer.when(function() {
+        return demoSegmentsLayer.queryExtent();
+      }).then(function(result) {
+        if (result && result.extent) {
+          view.goTo(result.extent.expand(1.15)).catch(function() {});
+          setStatus("Demo survey segments loaded from local GeoJSON. Click “Draw Line” to compare measurements.");
+        }
+      }).catch(function(err) {
+        console.warn("Failed to load demo segments layer:", err);
       });
 
       view.on("click", function(event) {
