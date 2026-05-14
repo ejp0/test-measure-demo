@@ -595,14 +595,14 @@
         }));
 
         const baseline = rows[0] && Number.isFinite(rows[0].convertedValue) ? rows[0].convertedValue : NaN;
-        const magnitudes = rows
+        const validMagnitudes = rows
           .slice(1)
           .map(row => Number.isFinite(row.convertedValue) && Number.isFinite(baseline) ? Math.abs(row.convertedValue - baseline) : NaN)
-          .filter(Number.isFinite);
-        const maxMagnitude = magnitudes.length ? Math.max(...magnitudes) : 0;
+          .filter(Number.isFinite)
+          .sort((a, b) => a - b);
 
         rows.forEach(function(row, index) {
-          const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === 0, maxMagnitude);
+          const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === 0, validMagnitudes);
           row.differenceFromBaseline = diffInfo.text;
           row.differenceStyle = diffInfo.style;
         });
@@ -753,7 +753,7 @@
         }
       }
 
-      function buildDifferenceInfo(value, baseline, isBaselineRow, maxMagnitude) {
+      function buildDifferenceInfo(value, baseline, isBaselineRow, sortedMagnitudes) {
         if (isBaselineRow) {
           return {
             text: "0.000 intl ft",
@@ -769,19 +769,27 @@
 
         const difference = value - baseline;
         const magnitude = Math.abs(difference);
-        const normalized = maxMagnitude > 0 ? magnitude / maxMagnitude : 0;
-        const eased = Math.pow(normalized, 0.65);
-        const lightness = 98 - eased * 48;
-        const saturation = 55 + eased * 35;
-        const borderAlpha = 0.12 + eased * 0.3;
+        const percentile = getMagnitudePercentile(magnitude, sortedMagnitudes);
+        const eased = Math.pow(percentile, 0.85);
+        const lightness = 97 - eased * 42;
+        const saturation = 45 + eased * 45;
         const backgroundColor = `hsl(0, ${saturation}%, ${lightness}%)`;
-        const textColor = lightness < 70 ? "#7f1d1d" : "#991b1b";
-        const borderColor = `rgba(127, 29, 29, ${borderAlpha})`;
+        const textColor = lightness < 72 ? "#7f1d1d" : "#991b1b";
 
         return {
           text: `${difference >= 0 ? "+" : ""}${formatNumber(difference)} intl ft`,
-          style: `background-color: ${backgroundColor}; color: ${textColor}; box-shadow: inset 4px 0 0 ${borderColor};`
+          style: `background-color: ${backgroundColor}; color: ${textColor};`
         };
+      }
+
+      function getMagnitudePercentile(magnitude, sortedMagnitudes) {
+        if (!sortedMagnitudes.length) return 0;
+        if (sortedMagnitudes.length === 1) return 1;
+
+        const exactIndex = sortedMagnitudes.findIndex(value => value === magnitude);
+        const rank = exactIndex >= 0 ? exactIndex : sortedMagnitudes.findIndex(value => value > magnitude);
+        const resolvedRank = rank >= 0 ? rank : sortedMagnitudes.length - 1;
+        return resolvedRank / (sortedMagnitudes.length - 1);
       }
 
       function formatInternationalFeetFromMeters(valueInMeters) {
