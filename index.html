@@ -345,6 +345,7 @@
           }
         },
         popupEnabled: false,
+        outFields: ["*"],
         visible: true
       });
 
@@ -583,13 +584,62 @@
           return;
         }
 
+        const attributes = await fetchSelectedSegmentAttributes(graphic, geometry);
+
         selectedSegmentData = {
           geometry,
-          attributes: graphic.attributes || {}
+          attributes: attributes || {}
         };
         highlightSelectedSegment(geometry);
         setStatus("Segment selected. Comparison table updated using the survey segment baseline.");
         renderResults();
+      }
+
+      async function fetchSelectedSegmentAttributes(graphic, geometry) {
+        const hitAttributes = graphic && graphic.attributes ? graphic.attributes : {};
+        const hitObjectId = getAttributeValue(hitAttributes, ["OBJECTID", "objectid", "ObjectId", "FID", "fid"]);
+
+        if (hitObjectId != null) {
+          try {
+            const objectIdField = demoSegmentsLayer.objectIdField || "OBJECTID";
+            const query = demoSegmentsLayer.createQuery();
+            query.where = `${objectIdField} = ${typeof hitObjectId === "number" ? hitObjectId : `'${String(hitObjectId).replace(/'/g, "''")}'`}`;
+            query.returnGeometry = false;
+            query.outFields = ["*"];
+            const result = await demoSegmentsLayer.queryFeatures(query);
+            if (result.features && result.features.length && result.features[0].attributes) {
+              return result.features[0].attributes;
+            }
+          } catch (err) {
+            console.warn("Query by object id failed:", err);
+          }
+        }
+
+        try {
+          const query = demoSegmentsLayer.createQuery();
+          query.geometry = geometry.extent ? geometry.extent.expand(1.01) : geometry;
+          query.spatialRelationship = "intersects";
+          query.returnGeometry = false;
+          query.outFields = ["*"];
+          const result = await demoSegmentsLayer.queryFeatures(query);
+          if (result.features && result.features.length) {
+            const matched = result.features.find(function(feature) {
+              const attrs = feature.attributes || {};
+              if (hitObjectId != null) {
+                const candidateObjectId = getAttributeValue(attrs, ["OBJECTID", "objectid", "ObjectId", "FID", "fid"]);
+                return candidateObjectId != null && String(candidateObjectId) === String(hitObjectId);
+              }
+              return true;
+            });
+            if (matched && matched.attributes) {
+              return matched.attributes;
+            }
+          }
+        } catch (err) {
+          console.warn("Geometry-based attribute query failed:", err);
+        }
+
+        return hitAttributes;
       }
 
       function highlightSelectedSegment(geometry) {
