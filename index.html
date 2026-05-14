@@ -136,7 +136,23 @@
 
     .diff-cell {
       font-weight: 400;
+      text-align: right;
       transition: background-color 120ms ease-in-out, color 120ms ease-in-out;
+    }
+
+    .diff-value {
+      display: block;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .diff-unit {
+      display: block;
+      text-align: right;
+      font-size: 0.8rem;
+      color: inherit;
+      opacity: 0.8;
+      margin-top: 2px;
     }
 
     .note-link {
@@ -618,12 +634,12 @@
 
         rows.forEach(function(row, index) {
           if (row.outOfScope) {
-            row.differenceFromBaseline = "Out of scope";
+            row.differenceHtml = buildDifferenceHtml("Out of scope", "", true);
             row.differenceStyle = "background-color: #f3f4f6; color: #6b7280;";
             return;
           }
           const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === 0, validMagnitudes);
-          row.differenceFromBaseline = diffInfo.text;
+          row.differenceHtml = diffInfo.html;
           row.differenceStyle = diffInfo.style;
         });
 
@@ -633,7 +649,7 @@
             <td>${escapeHtml(row.method)}</td>
             <td>${escapeHtml(row.nativeResult)}</td>
             <td>${escapeHtml(row.convertedResult)}</td>
-            <td class="diff-cell"${row.differenceStyle ? ` style="${escapeHtml(row.differenceStyle)}"` : ""}>${escapeHtml(row.differenceFromBaseline)}</td>
+            <td class="diff-cell"${row.differenceStyle ? ` style="${escapeHtml(row.differenceStyle)}"` : ""}>${row.differenceHtml}</td>
             <td>${row.noteHtml}</td>
           </tr>
         `).join("");
@@ -795,13 +811,13 @@
       function buildDifferenceInfo(value, baseline, isBaselineRow, sortedMagnitudes) {
         if (isBaselineRow) {
           return {
-            text: "0.000 intl ft",
+            html: buildDifferenceHtml("0.000", "intl ft"),
             style: "background-color: #ffffff; color: #111827;"
           };
         }
         if (!Number.isFinite(value) || !Number.isFinite(baseline)) {
           return {
-            text: "Unable to compute",
+            html: buildDifferenceHtml("Unable to compute", "", true),
             style: ""
           };
         }
@@ -816,9 +832,16 @@
         const textColor = lightness < 72 ? "#7f1d1d" : "#991b1b";
 
         return {
-          text: `${difference >= 0 ? "+" : ""}${formatNumber(difference)} intl ft`,
+          html: buildDifferenceHtml(`${difference >= 0 ? "+" : ""}${formatNumber(difference)}`, "intl ft"),
           style: `background-color: ${backgroundColor}; color: ${textColor};`
         };
+      }
+
+      function buildDifferenceHtml(valueText, unitText, singleLine) {
+        if (singleLine || !unitText) {
+          return `<span class="diff-value">${escapeHtml(valueText)}</span>`;
+        }
+        return `<span class="diff-value">${escapeHtml(valueText)}</span><span class="diff-unit">${escapeHtml(unitText)}</span>`;
       }
 
       function getMagnitudePercentile(magnitude, sortedMagnitudes) {
