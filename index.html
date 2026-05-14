@@ -84,8 +84,7 @@
     }
 
     .status,
-    .note,
-    .custom-crs {
+    .note {
       margin-top: 12px;
       margin-bottom: 12px;
       padding: 10px;
@@ -101,14 +100,6 @@
     .note {
       font-size: 0.95rem;
       line-height: 1.4;
-    }
-
-    .custom-crs textarea {
-      width: 100%;
-      box-sizing: border-box;
-      min-height: 120px;
-      font-family: monospace;
-      margin-top: 6px;
     }
 
     table {
@@ -197,6 +188,7 @@
         The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
       </div>
 
+      <!--
       <div class="custom-crs">
         <h3>Custom CRS definition</h3>
         <div class="small">Custom Proj4-style CRS input is preserved as a placeholder for future comparison work, but custom client-side reprojection is not wired in this Esri-first version.</div>
@@ -204,6 +196,7 @@
         <button id="applyCustomBtn">Apply Custom CRS</button>
         <div id="customCrsStatus" class="small" style="margin-top:8px;">Custom CRS is not active in this version.</div>
       </div>
+      -->
     </div>
   </div>
 
@@ -238,11 +231,9 @@
 
       const statusEl = document.getElementById("status");
       const resultsBody = document.getElementById("resultsBody");
-      const customCrsStatus = document.getElementById("customCrsStatus");
       const drawLineBtn = document.getElementById("drawLineBtn");
       const undoBtn = document.getElementById("undoBtn");
       const clearBtn = document.getElementById("clearBtn");
-      const applyCustomBtn = document.getElementById("applyCustomBtn");
       const toggleStatePlaneEl = document.getElementById("toggleStatePlane");
       const toggleUtmEl = document.getElementById("toggleUtm");
       const toggleSegmentsEl = document.getElementById("toggleSegments");
@@ -341,7 +332,6 @@
       drawLineBtn.addEventListener("click", startLine);
       undoBtn.addEventListener("click", undoPoint);
       clearBtn.addEventListener("click", clearAll);
-      applyCustomBtn.addEventListener("click", applyCustomCRS);
       toggleStatePlaneEl.addEventListener("change", function() {
         statePlaneLayer.visible = toggleStatePlaneEl.checked;
       });
@@ -480,10 +470,6 @@
         }
       }
 
-      function applyCustomCRS() {
-        customCrsStatus.textContent = "Custom CRS is not active in this Esri-first version yet.";
-      }
-
       async function renderResults() {
         if (mode !== "line" || points.length < 2) {
           resultsBody.innerHTML = '<tr><td colspan="5">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
@@ -504,13 +490,50 @@
         const rows = [];
 
         rows.push(makeMeasurementRow({
-          label: "WGS84 / EPSG:4326",
-          spatialReferenceUnitOfMeasure: "degrees",
-          method: "Geodesic",
-          note: "Geodesic length is computed in meters, but EPSG:4326 does not have a native planar linear unit for line length.",
-          compute: () => geometryEngine.geodesicLength(line, "meters"),
-          nativeFormatter: () => "NULL",
+          label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
+          spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
+          method: "Planar",
+          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in U.S. survey feet.",
+          compute: () => {
+            const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
+            return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
+        }));
+
+        rows.push({
+          spatialReferenceCell: `${buildSpatialReferenceCell("Custom CRS", "Not implemented")}`,
+          method: "Deferred",
+          nativeResult: "Not implemented",
+          convertedResult: "Not implemented",
+          note: "Custom CRS comparison is deferred in this Esri-first rewrite."
+        });
+
+        rows.push(makeMeasurementRow({
+          label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
+          spatialReferenceUnitOfMeasure: "meter",
+          method: "Planar",
+          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
+          compute: () => {
+            const projected = safeProject(line, new SpatialReference({ wkid: 26910 }));
+            return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} m`,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
+        }));
+
+        rows.push(makeMeasurementRow({
+          label: "NAD 1983 BLM Zone 10N (US Feet)",
+          spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
+          method: "Planar",
+          note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in U.S. survey feet.",
+          compute: () => {
+            const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
+            return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
         }));
 
         rows.push(makeMeasurementRow({
@@ -527,51 +550,14 @@
         }));
 
         rows.push(makeMeasurementRow({
-          label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
-          spatialReferenceUnitOfMeasure: "meter",
-          method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
-          compute: () => {
-            const projected = safeProject(line, new SpatialReference({ wkid: 26910 }));
-            return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
-          },
-          nativeFormatter: (value) => `${formatNumber(value)} m`,
+          label: "WGS84 / EPSG:4326",
+          spatialReferenceUnitOfMeasure: "degrees",
+          method: "Geodesic",
+          note: "Geodesic length is computed in meters, but EPSG:4326 does not have a native planar linear unit for line length.",
+          compute: () => geometryEngine.geodesicLength(line, "meters"),
+          nativeFormatter: () => "NULL",
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
-
-        rows.push(makeMeasurementRow({
-          label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
-          spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
-          method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in U.S. survey feet.",
-          compute: () => {
-            const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
-            return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
-          },
-          nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
-          internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
-        }));
-
-        rows.push(makeMeasurementRow({
-          label: "NAD 1983 BLM Zone 10N (US Feet)",
-          spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
-          method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in U.S. survey feet.",
-          compute: () => {
-            const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
-            return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
-          },
-          nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
-          internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
-        }));
-
-        rows.push({
-          spatialReferenceCell: `${buildSpatialReferenceCell("Custom CRS", "Not implemented")}`,
-          method: "Deferred",
-          nativeResult: "Not implemented",
-          convertedResult: "Not implemented",
-          note: "Custom CRS comparison is deferred in this Esri-first rewrite."
-        });
 
         resultsBody.innerHTML = rows.map(row => `
           <tr>
