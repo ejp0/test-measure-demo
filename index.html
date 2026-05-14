@@ -171,12 +171,13 @@
             <th>Method</th>
             <th>Result in native unit of measure</th>
             <th>Result converted to international foot (0.3048 meters)</th>
+            <th>Difference from EPSG:2227 (intl ft)</th>
             <th>Notes</th>
           </tr>
         </thead>
         <tbody id="resultsBody">
           <tr>
-            <td colspan="5">No line drawn yet.</td>
+            <td colspan="6">No line drawn yet.</td>
           </tr>
         </tbody>
       </table>
@@ -493,7 +494,7 @@
 
       async function renderResults() {
         if (mode !== "line" || points.length < 2) {
-          resultsBody.innerHTML = '<tr><td colspan="5">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
+          resultsBody.innerHTML = '<tr><td colspan="6">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
           return;
         }
 
@@ -582,12 +583,18 @@
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
+        const baseline = rows[0] && Number.isFinite(rows[0].convertedValue) ? rows[0].convertedValue : NaN;
+        rows.forEach(function(row, index) {
+          row.differenceFromBaseline = formatDifferenceFromBaseline(row.convertedValue, baseline, index === 0);
+        });
+
         resultsBody.innerHTML = rows.map(row => `
           <tr>
             <td>${row.spatialReferenceCell}</td>
             <td>${escapeHtml(row.method)}</td>
             <td>${escapeHtml(row.nativeResult)}</td>
             <td>${escapeHtml(row.convertedResult)}</td>
+            <td>${escapeHtml(row.differenceFromBaseline)}</td>
             <td>${escapeHtml(row.note)}</td>
           </tr>
         `).join("");
@@ -701,15 +708,19 @@
               method,
               nativeResult: "Unable to compute",
               convertedResult: "Unable to compute",
+              convertedValue: NaN,
               note
             };
           }
+
+          const convertedValue = getConvertedValue(value, internationalFootFormatter);
 
           return {
             spatialReferenceCell: buildSpatialReferenceCell(label, spatialReferenceUnitOfMeasure),
             method,
             nativeResult: nativeFormatter(value),
             convertedResult: internationalFootFormatter(value),
+            convertedValue,
             note
           };
         } catch (err) {
@@ -719,9 +730,32 @@
             method,
             nativeResult: "Unable to compute",
             convertedResult: "Unable to compute",
+            convertedValue: NaN,
             note: `${note} Error: ${err.message}`
           };
         }
+      }
+
+      function getConvertedValue(value, formatter) {
+        if (formatter === formatInternationalFeetFromMeters) {
+          return value / INTERNATIONAL_FOOT_IN_METERS;
+        }
+        if (formatter === formatInternationalFeetFromUsSurveyFeet) {
+          const meters = value * US_SURVEY_FOOT_IN_METERS;
+          return meters / INTERNATIONAL_FOOT_IN_METERS;
+        }
+        return NaN;
+      }
+
+      function formatDifferenceFromBaseline(value, baseline, isBaselineRow) {
+        if (isBaselineRow) {
+          return "0.000 intl ft";
+        }
+        if (!Number.isFinite(value) || !Number.isFinite(baseline)) {
+          return "Unable to compute";
+        }
+        const difference = value - baseline;
+        return `${difference >= 0 ? "+" : ""}${formatNumber(difference)} intl ft`;
       }
 
       function formatInternationalFeetFromMeters(valueInMeters) {
