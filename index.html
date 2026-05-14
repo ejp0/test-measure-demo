@@ -7,6 +7,7 @@
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
   <script src="https://js.arcgis.com/4.30/"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
 
   <style>
     html, body, #app {
@@ -185,7 +186,7 @@
 
       <div class="note">
         This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
-        The comparison table currently focuses on Esri SDK measurement patterns and a geodesic baseline.
+        The comparison table currently includes Esri SDK measurement patterns, a geodesic baseline, and a draft California statewide SPCS2022 custom projection computed with Proj4js.
       </div>
 
       <!--
@@ -228,6 +229,8 @@
     ) {
       const INTERNATIONAL_FOOT_IN_METERS = 0.3048;
       const US_SURVEY_FOOT_IN_METERS = 0.3048006096012192;
+      const CUSTOM_CRS_NAME = "California Statewide SPCS2022 (draft)";
+      const CUSTOM_CRS_PROJ4 = "+proj=lcc +lat_1=33.5 +lat_2=39.0 +lat_0=36.5 +lon_0=-120 +x_0=2000000 +y_0=500000 +datum=NAD83 +units=m +no_defs";
 
       const statusEl = document.getElementById("status");
       const resultsBody = document.getElementById("resultsBody");
@@ -502,13 +505,18 @@
           internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
         }));
 
-        rows.push({
-          spatialReferenceCell: `${buildSpatialReferenceCell("Custom CRS", "Not implemented")}`,
-          method: "Deferred",
-          nativeResult: "Not implemented",
-          convertedResult: "Not implemented",
-          note: "Custom CRS comparison is deferred in this Esri-first rewrite."
-        });
+        rows.push(makeMeasurementRow({
+          label: CUSTOM_CRS_NAME,
+          spatialReferenceUnitOfMeasure: "meter",
+          method: "Planar",
+          note: "Projected with Proj4js using draft California statewide SPCS2022 Lambert Conformal Conic parameters and measured with planar length in meters.",
+          compute: () => {
+            const projector = proj4("EPSG:4326", CUSTOM_CRS_PROJ4);
+            return computeProjectedPolylineLength(points, projector);
+          },
+          nativeFormatter: (value) => `${formatNumber(value)} m`,
+          internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
+        }));
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
@@ -581,6 +589,22 @@
           console.warn("Projection failed:", err);
           return null;
         }
+      }
+
+      function computeProjectedPolylineLength(points, projector) {
+        if (!points || points.length < 2) return NaN;
+
+        let total = 0;
+
+        for (let i = 1; i < points.length; i++) {
+          const [x1, y1] = projector.forward(points[i - 1]);
+          const [x2, y2] = projector.forward(points[i]);
+          const dx = x2 - x1;
+          const dy = y2 - y1;
+          total += Math.sqrt(dx * dx + dy * dy);
+        }
+
+        return total;
       }
 
       function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, note, compute, nativeFormatter, internationalFootFormatter }) {
