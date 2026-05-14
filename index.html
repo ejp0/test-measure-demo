@@ -169,7 +169,7 @@
         </label>
         <label>
           <input type="checkbox" id="toggleUtm" checked />
-          UTM zone boundaries
+          UTM zone 10 extent
         </label>
         <label>
           <input type="checkbox" id="toggleSegments" checked />
@@ -292,19 +292,19 @@
         visible: true
       });
 
-      const utmLayer = new FeatureLayer({
-        url: "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/World_UTM_Grid/FeatureServer/0",
-        title: "UTM zone boundaries",
-        opacity: 0.35,
+      const utmLayer = new GeoJSONLayer({
+        url: "./utmzone10N_Dis_FeaturesToJSO.geojson",
+        title: "UTM zone 10 extent",
+        opacity: 1,
         renderer: {
           type: "simple",
           symbol: {
             type: "simple-fill",
-            color: [0, 0, 0, 0],
+            color: [37, 99, 235, 0.08],
             outline: {
-              color: [37, 99, 235, 0.75],
-              width: 1,
-              style: "short-dot"
+              color: [37, 99, 235, 0.22],
+              width: 0.8,
+              style: "solid"
             }
           }
         },
@@ -374,15 +374,19 @@
         demoSegmentsLayer.visible = toggleSegmentsEl.checked;
       });
 
-      demoSegmentsLayer.when(function() {
-        return demoSegmentsLayer.queryExtent();
-      }).then(function(result) {
-        if (result && result.extent) {
-          view.goTo(result.extent.expand(1.15)).catch(function() {});
-          setStatus("Demo survey segments loaded from local GeoJSON. Click “Draw Line” to compare measurements.");
+      Promise.allSettled([
+        demoSegmentsLayer.when().then(function() {
+          return demoSegmentsLayer.queryExtent();
+        }),
+        utmLayer.when()
+      ]).then(function(results) {
+        const demoResult = results[0];
+        if (demoResult.status === "fulfilled" && demoResult.value && demoResult.value.extent) {
+          view.goTo(demoResult.value.extent.expand(1.15)).catch(function() {});
         }
+        setStatus("Layers loaded. Click “Draw Line” to compare measurements.");
       }).catch(function(err) {
-        console.warn("Failed to load demo segments layer:", err);
+        console.warn("Layer initialization warning:", err);
       });
 
       view.when(function() {
