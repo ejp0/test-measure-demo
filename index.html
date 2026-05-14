@@ -7,7 +7,6 @@
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
   <script src="https://js.arcgis.com/4.30/"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
 
   <style>
     html, body, #app {
@@ -186,7 +185,7 @@
 
       <div class="note">
         This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
-        The comparison table currently includes Esri SDK measurement patterns, a geodesic baseline, and a draft California statewide SPCS2022 custom projection computed with Proj4js.
+        The comparison table currently includes Esri SDK measurement patterns, a geodesic baseline, and a draft California statewide SPCS2022 custom projection computed with direct Lambert Conformal Conic math.
       </div>
 
       <!--
@@ -230,7 +229,20 @@
       const INTERNATIONAL_FOOT_IN_METERS = 0.3048;
       const US_SURVEY_FOOT_IN_METERS = 0.3048006096012192;
       const CUSTOM_CRS_NAME = "California Statewide SPCS2022 (draft)";
-      const CUSTOM_CRS_PROJ4 = "+proj=lcc +lat_1=33.5 +lat_2=39.0 +lat_0=36.5 +lon_0=-120 +x_0=2000000 +y_0=500000 +datum=NAD83 +units=m +no_defs";
+      const GRS80_A = 6378137.0;
+      const GRS80_F_INV = 298.257222101;
+      const GRS80_F = 1 / GRS80_F_INV;
+      const GRS80_E2 = 2 * GRS80_F - GRS80_F * GRS80_F;
+      const CUSTOM_LCC = buildLambertConformalConic2SP({
+        lat0Deg: 36.5,
+        lon0Deg: -120.0,
+        lat1Deg: 33.5,
+        lat2Deg: 39.0,
+        falseEasting: 2000000.0,
+        falseNorthing: 500000.0,
+        a: GRS80_A,
+        e2: GRS80_E2
+      });
 
       const statusEl = document.getElementById("status");
       const resultsBody = document.getElementById("resultsBody");
@@ -515,16 +527,8 @@
           label: CUSTOM_CRS_NAME,
           spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          note: typeof proj4 === "function"
-            ? "Projected with Proj4js using draft California statewide SPCS2022 Lambert Conformal Conic parameters and measured with planar length in meters."
-            : "Proj4js did not load, so the draft California statewide SPCS2022 custom projection could not be computed.",
-          compute: () => {
-            if (typeof proj4 !== "function") {
-              return NaN;
-            }
-            const projector = proj4("EPSG:4326", CUSTOM_CRS_PROJ4);
-            return computeProjectedPolylineLength(points, projector);
-          },
+          note: "Projected with direct Lambert Conformal Conic (2SP) math using draft California statewide SPCS2022 parameters and measured with planar length in meters.",
+          compute: () => computeProjectedPolylineLength(points, projectCustomLccPoint),
           nativeFormatter: (value) => `${formatNumber(value)} m`,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
@@ -603,13 +607,13 @@
       }
 
       function computeProjectedPolylineLength(points, projector) {
-        if (!points || points.length < 2 || !projector || typeof projector.forward !== "function") return NaN;
+        if (!points || points.length < 2 || typeof projector !== "function") return NaN;
 
         let total = 0;
 
         for (let i = 1; i < points.length; i++) {
-          const start = projector.forward(points[i - 1]);
-          const end = projector.forward(points[i]);
+          const start = projector(points[i - 1]);
+          const end = projector(points[i]);
 
           if (!Array.isArray(start) || !Array.isArray(end) || start.length < 2 || end.length < 2) {
             return NaN;
@@ -621,6 +625,71 @@
         }
 
         return total;
+      }
+
+      function projectCustomLccPoint(point) {
+        if (!Array.isArray(point) || point.length < 2) return [NaN, NaN];
+        return forwardLambertConformalConic2SP(point[0], point[1], CUSTOM_LCC);
+      }
+
+      function buildLambertConformalConic2SP({ lat0Deg, lon0Deg, lat1Deg, lat2Deg, falseEasting, falseNorthing, a, e2 }) {
+        const e = Math.sqrt(e2);
+        const lat0 = degToRad(lat0Deg);
+        const lon0 = degToRad(lon0Deg);
+        const lat1 = degToRad(lat1Deg);
+        const lat2 = degToRad(lat2Deg);
+
+        const m1 = lccM(lat1, e2);
+        const m2 = lccM(lat2, e2);
+        const t1 = lccT(lat1, e);
+        const t2 = lccT(lat2, e);
+        const t0 = lccT(lat0, e);
+
+        const n = (Math.log(m1) - Math.log(m2)) / (Math.log(t1) - Math.log(t2));
+        const f = m1 / (n * Math.pow(t1, n));
+        const rho0 = a * f * Math.pow(t0, n);
+
+        return {
+          a,
+          e,
+          n,
+          f,
+          rho0,
+          lon0,
+          falseEasting,
+          falseNorthing
+        };
+      }
+
+      function forwardLambertConformalConic2SP(lonDeg, latDeg, params) {
+        const lon = degToRad(lonDeg);
+        const lat = degToRad(latDeg);
+        const t = lccT(lat, params.e);
+        const rho = params.a * params.f * Math.pow(t, params.n);
+        const theta = params.n * normalizeLongitudeRadians(lon - params.lon0);
+        const x = params.falseEasting + rho * Math.sin(theta);
+        const y = params.falseNorthing + params.rho0 - rho * Math.cos(theta);
+        return [x, y];
+      }
+
+      function lccM(phi, e2) {
+        return Math.cos(phi) / Math.sqrt(1 - e2 * Math.pow(Math.sin(phi), 2));
+      }
+
+      function lccT(phi, e) {
+        const sinPhi = Math.sin(phi);
+        const esin = e * sinPhi;
+        return Math.tan(Math.PI / 4 - phi / 2) / Math.pow((1 - esin) / (1 + esin), e / 2);
+      }
+
+      function normalizeLongitudeRadians(lambda) {
+        while (lambda > Math.PI) lambda -= 2 * Math.PI;
+        while (lambda < -Math.PI) lambda += 2 * Math.PI;
+        return lambda;
+      }
+
+      function degToRad(value) {
+        return value * Math.PI / 180;
       }
 
       function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, note, compute, nativeFormatter, internationalFootFormatter }) {
