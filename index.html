@@ -138,6 +138,15 @@
       font-weight: 400;
       transition: background-color 120ms ease-in-out, color 120ms ease-in-out;
     }
+
+    .note-link {
+      color: #1d4ed8;
+      text-decoration: underline;
+    }
+
+    .note-link:hover {
+      color: #1e40af;
+    }
   </style>
 </head>
 <body>
@@ -235,6 +244,8 @@
       const INTERNATIONAL_FOOT_IN_METERS = 0.3048;
       const US_SURVEY_FOOT_IN_METERS = 0.3048006096012192;
       const CUSTOM_CRS_NAME = "California Statewide SPCS2022 (draft)";
+      const WGS84_REFERENCE_URL = "https://www.esri.com/arcgis-blog/products/arcgis-pro/mapping/gcs_vs_pcs";
+      const WEB_MERCATOR_REFERENCE_URL = "https://www.esri.com/arcgis-blog/products/arcgis-solutions/defense/what-does-the-nga-web-mercator-advisory-mean-for-esri-defense-and-intelligence-users";
       const GRS80_A = 6378137.0;
       const GRS80_F_INV = 298.257222101;
       const GRS80_F = 1 / GRS80_F_INV;
@@ -520,7 +531,7 @@
           label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
           spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
           method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in U.S. survey feet.",
+          noteText: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in U.S. survey feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 2227 }));
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
@@ -534,7 +545,7 @@
           label: CUSTOM_CRS_NAME,
           spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          note: "Projected with direct Lambert Conformal Conic (2SP) math using draft California statewide SPCS2022 parameters and measured with planar length in meters.",
+          noteText: "Projected with direct Lambert Conformal Conic (2SP) math using draft California statewide SPCS2022 parameters and measured with planar length in meters.",
           compute: () => computeProjectedPolylineLength(points, projectCustomLccPoint),
           nativeFormatter: (value) => `${formatNumber(value)} m`,
           convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
@@ -545,7 +556,7 @@
           label: "NAD 1983 / UTM Zone 10N / EPSG:26910",
           spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
+          noteText: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 26910 }));
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
@@ -559,7 +570,7 @@
           label: "NAD 1983 BLM Zone 10N (US Feet)",
           spatialReferenceUnitOfMeasure: "U.S. survey foot (approx 0.3048006 meters)",
           method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in U.S. survey feet.",
+          noteText: "Projected with the ArcGIS Maps SDK to NAD 1983 BLM Zone 10N (US Feet) and measured with planar length in U.S. survey feet.",
           compute: () => {
             const projected = safeProject(line, new SpatialReference({ wkid: 4430 }));
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
@@ -573,7 +584,9 @@
           label: "Web Mercator / EPSG:3857",
           spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          note: "Projected with the ArcGIS Maps SDK projection module and measured with planar length in meters.",
+          noteText: "Note",
+          noteUrl: WEB_MERCATOR_REFERENCE_URL,
+          noteTitle: "Web Mercator advisory reference",
           compute: () => {
             const projected = safeProject(line, SpatialReference.WebMercator);
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
@@ -583,15 +596,13 @@
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
-        rows.push(makeMeasurementRow({
+        rows.push(makeOutOfScopeRow({
           label: "WGS84 / EPSG:4326",
           spatialReferenceUnitOfMeasure: "degrees",
-          method: "Geodesic",
-          note: "Geodesic length is computed in meters, but EPSG:4326 does not have a native planar linear unit for line length.",
-          compute: () => geometryEngine.geodesicLength(line, "meters"),
-          nativeFormatter: () => "NULL",
-          convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
-          internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
+          method: "Out of scope",
+          noteText: "Note",
+          noteUrl: WGS84_REFERENCE_URL,
+          noteTitle: "Geographic vs projected coordinate systems reference"
         }));
 
         const baseline = rows[0] && Number.isFinite(rows[0].convertedValue) ? rows[0].convertedValue : NaN;
@@ -602,6 +613,11 @@
           .sort((a, b) => a - b);
 
         rows.forEach(function(row, index) {
+          if (row.outOfScope) {
+            row.differenceFromBaseline = "Out of scope";
+            row.differenceStyle = "background-color: #f3f4f6; color: #6b7280;";
+            return;
+          }
           const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === 0, validMagnitudes);
           row.differenceFromBaseline = diffInfo.text;
           row.differenceStyle = diffInfo.style;
@@ -614,7 +630,7 @@
             <td>${escapeHtml(row.nativeResult)}</td>
             <td>${escapeHtml(row.convertedResult)}</td>
             <td class="diff-cell"${row.differenceStyle ? ` style="${escapeHtml(row.differenceStyle)}"` : ""}>${escapeHtml(row.differenceFromBaseline)}</td>
-            <td>${escapeHtml(row.note)}</td>
+            <td>${row.noteHtml}</td>
           </tr>
         `).join("");
       }
@@ -718,7 +734,7 @@
         return value * Math.PI / 180;
       }
 
-      function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, note, compute, nativeFormatter, convertedValueGetter, internationalFootFormatter }) {
+      function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, noteText, noteUrl, noteTitle, compute, nativeFormatter, convertedValueGetter, internationalFootFormatter }) {
         try {
           const value = compute();
           if (!Number.isFinite(value)) {
@@ -728,7 +744,7 @@
               nativeResult: "Unable to compute",
               convertedResult: "Unable to compute",
               convertedValue: NaN,
-              note
+              noteHtml: buildNoteHtml(noteText, noteUrl, noteTitle)
             };
           }
 
@@ -738,7 +754,7 @@
             nativeResult: nativeFormatter(value),
             convertedResult: internationalFootFormatter(value),
             convertedValue: convertedValueGetter(value),
-            note
+            noteHtml: buildNoteHtml(noteText, noteUrl, noteTitle)
           };
         } catch (err) {
           console.warn(`Measurement failed for ${label}:`, err);
@@ -748,9 +764,28 @@
             nativeResult: "Unable to compute",
             convertedResult: "Unable to compute",
             convertedValue: NaN,
-            note: `${note} Error: ${err.message}`
+            noteHtml: buildNoteHtml(noteText ? `${noteText} Error: ${err.message}` : `Error: ${err.message}`, noteUrl, noteTitle)
           };
         }
+      }
+
+      function makeOutOfScopeRow({ label, spatialReferenceUnitOfMeasure, method, noteText, noteUrl, noteTitle }) {
+        return {
+          spatialReferenceCell: buildSpatialReferenceCell(label, spatialReferenceUnitOfMeasure),
+          method,
+          nativeResult: "NULL",
+          convertedResult: "NULL",
+          convertedValue: NaN,
+          outOfScope: true,
+          noteHtml: buildNoteHtml(noteText, noteUrl, noteTitle)
+        };
+      }
+
+      function buildNoteHtml(noteText, noteUrl, noteTitle) {
+        if (!noteText) return "";
+        if (!noteUrl) return escapeHtml(noteText);
+        const titleAttr = noteTitle ? ` title="${escapeHtml(noteTitle)}"` : "";
+        return `<a class="note-link" href="${escapeAttribute(noteUrl)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${escapeHtml(noteText)}</a>`;
       }
 
       function buildDifferenceInfo(value, baseline, isBaselineRow, sortedMagnitudes) {
@@ -815,6 +850,14 @@
           .replace(/>/g, "&gt;")
           .replace(/\"/g, "&quot;")
           .replace(/'/g, "&#39;");
+      }
+
+      function escapeAttribute(str) {
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/\"/g, "&quot;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
       }
     });
   </script>
