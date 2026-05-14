@@ -356,6 +356,12 @@
         console.warn("Failed to load demo segments layer:", err);
       });
 
+      view.when(function() {
+        setStatus("Ready. Click “Draw Line” to compare measurements.");
+      }).catch(function(err) {
+        console.error("Map view failed to load:", err);
+      });
+
       view.on("click", function(event) {
         if (!drawing) return;
         event.stopPropagation();
@@ -509,8 +515,13 @@
           label: CUSTOM_CRS_NAME,
           spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
-          note: "Projected with Proj4js using draft California statewide SPCS2022 Lambert Conformal Conic parameters and measured with planar length in meters.",
+          note: typeof proj4 === "function"
+            ? "Projected with Proj4js using draft California statewide SPCS2022 Lambert Conformal Conic parameters and measured with planar length in meters."
+            : "Proj4js did not load, so the draft California statewide SPCS2022 custom projection could not be computed.",
           compute: () => {
+            if (typeof proj4 !== "function") {
+              return NaN;
+            }
             const projector = proj4("EPSG:4326", CUSTOM_CRS_PROJ4);
             return computeProjectedPolylineLength(points, projector);
           },
@@ -592,15 +603,20 @@
       }
 
       function computeProjectedPolylineLength(points, projector) {
-        if (!points || points.length < 2) return NaN;
+        if (!points || points.length < 2 || !projector || typeof projector.forward !== "function") return NaN;
 
         let total = 0;
 
         for (let i = 1; i < points.length; i++) {
-          const [x1, y1] = projector.forward(points[i - 1]);
-          const [x2, y2] = projector.forward(points[i]);
-          const dx = x2 - x1;
-          const dy = y2 - y1;
+          const start = projector.forward(points[i - 1]);
+          const end = projector.forward(points[i]);
+
+          if (!Array.isArray(start) || !Array.isArray(end) || start.length < 2 || end.length < 2) {
+            return NaN;
+          }
+
+          const dx = end[0] - start[0];
+          const dy = end[1] - start[1];
           total += Math.sqrt(dx * dx + dy * dy);
         }
 
