@@ -136,6 +136,7 @@
 
     .diff-cell {
       font-weight: 600;
+      transition: background-color 120ms ease-in-out, color 120ms ease-in-out;
     }
   </style>
 </head>
@@ -768,14 +769,18 @@
 
         const difference = value - baseline;
         const magnitude = Math.abs(difference);
-        const intensity = maxMagnitude > 0 ? magnitude / maxMagnitude : 0;
-        const lightness = 96 - intensity * 38;
-        const backgroundColor = `hsl(0, 85%, ${lightness}%)`;
-        const textColor = lightness < 72 ? "#7f1d1d" : "#991b1b";
+        const normalized = maxMagnitude > 0 ? magnitude / maxMagnitude : 0;
+        const eased = Math.pow(normalized, 0.65);
+        const lightness = 98 - eased * 48;
+        const saturation = 55 + eased * 35;
+        const borderAlpha = 0.12 + eased * 0.3;
+        const backgroundColor = `hsl(0, ${saturation}%, ${lightness}%)`;
+        const textColor = lightness < 70 ? "#7f1d1d" : "#991b1b";
+        const borderColor = `rgba(127, 29, 29, ${borderAlpha})`;
 
         return {
           text: `${difference >= 0 ? "+" : ""}${formatNumber(difference)} intl ft`,
-          style: `background-color: ${backgroundColor}; color: ${textColor};`
+          style: `background-color: ${backgroundColor}; color: ${textColor}; box-shadow: inset 4px 0 0 ${borderColor};`
         };
       }
 
