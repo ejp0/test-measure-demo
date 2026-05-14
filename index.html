@@ -85,6 +85,12 @@
       background: #f8fafc;
     }
 
+    button.active-mode {
+      background: #e0f2fe;
+      border-color: #38bdf8;
+      color: #0f172a;
+    }
+
     .status,
     .note {
       margin-top: 8px;
@@ -177,7 +183,8 @@
       <h2>Projection Comparison Tool</h2>
 
       <div class="controls">
-        <button id="drawLineBtn">Draw Line</button>
+        <button id="selectSegmentBtn">Select segment</button>
+        <button id="drawLineBtn">Draw my own line</button>
         <button id="undoBtn">Undo Last Point</button>
         <button id="clearBtn">Clear</button>
       </div>
@@ -205,33 +212,23 @@
             <th>Method</th>
             <th>Result in native unit of measure</th>
             <th>Result converted to international foot (0.3048 meters)</th>
-            <th>Difference from EPSG:2227 (intl ft)</th>
+            <th>Difference from baseline (intl ft)</th>
             <th>Notes</th>
           </tr>
         </thead>
         <tbody id="resultsBody">
           <tr>
-            <td colspan="6">No line drawn yet.</td>
+            <td colspan="6">No line drawn or segment selected yet.</td>
           </tr>
         </tbody>
       </table>
 
-      <div id="status" class="status">Ready. Click “Draw Line” to compare measurements.</div>
+      <div id="status" class="status">Ready. Select a segment or click “Draw my own line” to compare measurements.</div>
 
       <div class="note">
-        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, and geometry operations.
-        The comparison table currently includes Esri SDK measurement patterns, a geodesic baseline, and a draft California statewide SPCS2022 custom projection computed with direct Lambert Conformal Conic math.
+        This version uses the <span class="mono">ArcGIS Maps SDK for JavaScript</span> for map display, sketch interaction, feature selection, and geometry operations.
+        The comparison table currently supports either a selected survey segment baseline or a user-drawn comparison line, plus a draft California statewide SPCS2022 custom projection computed with direct Lambert Conformal Conic math.
       </div>
-
-      <!--
-      <div class="custom-crs">
-        <h3>Custom CRS definition</h3>
-        <div class="small">Custom Proj4-style CRS input is preserved as a placeholder for future comparison work, but custom client-side reprojection is not wired in this Esri-first version.</div>
-        <textarea id="customProjText" placeholder="Future enhancement: custom CRS definition support"></textarea>
-        <button id="applyCustomBtn">Apply Custom CRS</button>
-        <div id="customCrsStatus" class="small" style="margin-top:8px;">Custom CRS is not active in this version.</div>
-      </div>
-      -->
     </div>
   </div>
 
@@ -264,6 +261,7 @@
       const INTERNATIONAL_FOOT_IN_METERS = 0.3048;
       const US_SURVEY_FOOT_IN_METERS = 0.3048006096012192;
       const CUSTOM_CRS_NAME = "California Statewide SPCS2022 (draft)";
+      const SURVEY_GRADE_NOTE = "Segment measured by PG&E Land Survey team xx/xx/2025";
       const WGS84_REFERENCE_URL = "https://www.esri.com/arcgis-blog/products/arcgis-pro/mapping/gcs_vs_pcs";
       const WEB_MERCATOR_REFERENCE_URL = "https://www.esri.com/arcgis-blog/products/arcgis-solutions/defense/what-does-the-nga-web-mercator-advisory-mean-for-esri-defense-and-intelligence-users";
       const GRS80_A = 6378137.0;
@@ -283,6 +281,7 @@
 
       const statusEl = document.getElementById("status");
       const resultsBody = document.getElementById("resultsBody");
+      const selectSegmentBtn = document.getElementById("selectSegmentBtn");
       const drawLineBtn = document.getElementById("drawLineBtn");
       const undoBtn = document.getElementById("undoBtn");
       const clearBtn = document.getElementById("clearBtn");
@@ -291,6 +290,7 @@
       const toggleSegmentsEl = document.getElementById("toggleSegments");
 
       const graphicsLayer = new GraphicsLayer();
+      const selectionLayer = new GraphicsLayer();
 
       const statePlaneLayer = new FeatureLayer({
         url: "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_State_Plane_Zones_NAD83/FeatureServer/0",
@@ -344,28 +344,13 @@
             style: "solid"
           }
         },
-        popupTemplate: {
-          title: "{NAME}",
-          content: [
-            {
-              type: "fields",
-              fieldInfos: [
-                { fieldName: "truth_length", label: "Truth length" },
-                { fieldName: "truth_units", label: "Truth units" },
-                { fieldName: "src_length", label: "Source length" },
-                { fieldName: "src_units", label: "Source units" },
-                { fieldName: "geod_length", label: "Geodesic length" },
-                { fieldName: "geod_units", label: "Geodesic units" }
-              ]
-            }
-          ]
-        },
+        popupEnabled: false,
         visible: true
       });
 
       const map = new Map({
         basemap: "topo-vector",
-        layers: [utmLayer, statePlaneLayer, demoSegmentsLayer, graphicsLayer]
+        layers: [utmLayer, statePlaneLayer, demoSegmentsLayer, selectionLayer, graphicsLayer]
       });
 
       const view = new MapView({
@@ -380,7 +365,10 @@
       let points = [];
       let vertexGraphics = [];
       let activeGraphic = null;
+      let selectedSegmentGraphic = null;
+      let selectedSegmentData = null;
 
+      selectSegmentBtn.addEventListener("click", startSelectSegment);
       drawLineBtn.addEventListener("click", startLine);
       undoBtn.addEventListener("click", undoPoint);
       clearBtn.addEventListener("click", clearAll);
@@ -392,6 +380,10 @@
       });
       toggleSegmentsEl.addEventListener("change", function() {
         demoSegmentsLayer.visible = toggleSegmentsEl.checked;
+        if (!demoSegmentsLayer.visible && selectedSegmentData) {
+          clearSelectedSegment();
+          renderResults();
+        }
       });
 
       Promise.allSettled([
@@ -404,20 +396,26 @@
         if (demoResult.status === "fulfilled" && demoResult.value && demoResult.value.extent) {
           view.goTo(demoResult.value.extent.expand(1.15)).catch(function() {});
         }
-        setStatus("Layers loaded. Click “Draw Line” to compare measurements.");
+        setStatus("Layers loaded. Select a segment or click “Draw my own line” to compare measurements.");
       }).catch(function(err) {
         console.warn("Layer initialization warning:", err);
       });
 
       view.when(function() {
-        setStatus("Ready. Click “Draw Line” to compare measurements.");
+        setStatus("Ready. Select a segment or click “Draw my own line” to compare measurements.");
       }).catch(function(err) {
         console.error("Map view failed to load:", err);
       });
 
       view.on("click", function(event) {
-        if (!drawing) return;
         event.stopPropagation();
+
+        if (mode === "select-segment") {
+          handleSelectSegmentClick(event);
+          return;
+        }
+
+        if (!drawing) return;
 
         const mapPoint = view.toMap({ x: event.x, y: event.y });
         if (!mapPoint) return;
@@ -429,7 +427,7 @@
         redraw();
 
         if (mode === "line") {
-          setStatus(`Line mode: ${points.length} point(s) added. ${points.length >= 2 ? "Comparison table updated." : "Add one more point to begin measuring."}`);
+          setStatus(`Draw mode active. ${points.length} point(s) added. ${points.length >= 2 ? "Comparison table updated." : "Add one more point to begin measuring."}`);
           renderResults();
         }
       });
@@ -438,32 +436,65 @@
         statusEl.textContent = text;
       }
 
+      function updateModeButtons() {
+        selectSegmentBtn.classList.toggle("active-mode", mode === "select-segment");
+        drawLineBtn.classList.toggle("active-mode", mode === "line");
+      }
+
+      function updateCursor() {
+        if (mode === "select-segment") {
+          view.container.style.cursor = "pointer";
+        } else if (mode === "line") {
+          view.container.style.cursor = "crosshair";
+        } else {
+          view.container.style.cursor = "default";
+        }
+      }
+
+      function startSelectSegment() {
+        drawing = false;
+        mode = "select-segment";
+        clearDrawnLineOnly();
+        updateModeButtons();
+        updateCursor();
+        setStatus("Select mode active. Click a green survey segment to populate the comparison table.");
+      }
+
       function startLine() {
         mode = "line";
-        resetDrawing();
-        setStatus("Line mode active. Click the map to add vertices and compare line measurements across Esri-supported workflows.");
+        drawing = true;
+        points = [];
+        clearDrawnLineOnly();
+        clearSelectedSegment();
+        updateModeButtons();
+        updateCursor();
+        setStatus("Draw mode active. Click the map to add vertices and compare line measurements.");
         renderResults();
       }
 
-      function resetDrawing() {
-        drawing = true;
+      function clearDrawnLineOnly() {
+        graphicsLayer.removeAll();
+        vertexGraphics = [];
+        activeGraphic = null;
         points = [];
-        clearGraphicsOnly();
+      }
+
+      function clearSelectedSegment() {
+        selectedSegmentData = null;
+        selectedSegmentGraphic = null;
+        selectionLayer.removeAll();
       }
 
       function clearAll() {
         drawing = false;
         mode = null;
         points = [];
-        clearGraphicsOnly();
-        setStatus("Cleared. Click “Draw Line” to begin again.");
+        clearDrawnLineOnly();
+        clearSelectedSegment();
+        updateModeButtons();
+        updateCursor();
+        setStatus("Cleared. Select a segment or click “Draw my own line” to begin again.");
         renderResults();
-      }
-
-      function clearGraphicsOnly() {
-        graphicsLayer.removeAll();
-        vertexGraphics = [];
-        activeGraphic = null;
       }
 
       function addVertexGraphic(point) {
@@ -486,26 +517,23 @@
       }
 
       function undoPoint() {
-        if (!points.length) return;
+        if (mode !== "line" || !points.length) return;
 
         points.pop();
         redrawAllFromState();
 
-        if (mode === "line") {
-          if (points.length < 2) {
-            setStatus(`Removed last point. ${points.length} point(s) remain. Add at least 2 points for line comparison.`);
-          } else {
-            setStatus(`Removed last point. ${points.length} vertices remain in the line.`);
-          }
-          renderResults();
-          return;
+        if (points.length < 2) {
+          setStatus(`Removed last point. ${points.length} point(s) remain. Add at least 2 points for line comparison.`);
+        } else {
+          setStatus(`Removed last point. ${points.length} vertices remain in the line.`);
         }
-
-        setStatus(`Removed last point. ${points.length} point(s) remain.`);
+        renderResults();
       }
 
       function redrawAllFromState() {
-        clearGraphicsOnly();
+        graphicsLayer.removeAll();
+        vertexGraphics = [];
+        activeGraphic = null;
         points.forEach(addVertexGraphic);
         redraw();
       }
@@ -532,16 +560,110 @@
         }
       }
 
-      async function renderResults() {
-        if (mode !== "line" || points.length < 2) {
-          resultsBody.innerHTML = '<tr><td colspan="6">Draw a line with at least 2 points to populate the comparison table.</td></tr>';
+      async function handleSelectSegmentClick(event) {
+        if (!demoSegmentsLayer.visible) {
+          setStatus("Demo survey segments are hidden. Re-enable them to select a segment.");
           return;
         }
 
-        const line = new Polyline({
-          paths: [points],
-          spatialReference: SpatialReference.WGS84
+        const hit = await view.hitTest(event);
+        const result = hit.results.find(function(item) {
+          return item.graphic && item.graphic.layer === demoSegmentsLayer;
         });
+
+        if (!result || !result.graphic) {
+          setStatus("Select mode active. Click directly on a green survey segment.");
+          return;
+        }
+
+        const graphic = result.graphic;
+        const geometry = normalizePolylineGeometry(graphic.geometry);
+        if (!geometry) {
+          setStatus("Unable to use the selected segment geometry.");
+          return;
+        }
+
+        selectedSegmentData = {
+          geometry,
+          attributes: graphic.attributes || {}
+        };
+        highlightSelectedSegment(geometry);
+        setStatus("Segment selected. Comparison table updated using the survey segment baseline.");
+        renderResults();
+      }
+
+      function highlightSelectedSegment(geometry) {
+        selectionLayer.removeAll();
+        selectedSegmentGraphic = new Graphic({
+          geometry,
+          symbol: {
+            type: "simple-line",
+            color: [250, 204, 21, 0.95],
+            width: 5,
+            style: "solid"
+          }
+        });
+        selectionLayer.add(selectedSegmentGraphic);
+      }
+
+      function normalizePolylineGeometry(geometry) {
+        if (!geometry || geometry.type !== "polyline" || !geometry.paths || !geometry.paths.length) return null;
+        return new Polyline({
+          paths: geometry.paths.map(function(path) {
+            return path.map(function(coord) {
+              return Array.isArray(coord) ? [coord[0], coord[1]] : [coord.x, coord.y];
+            });
+          }),
+          spatialReference: geometry.spatialReference || SpatialReference.WGS84
+        });
+      }
+
+      function getActiveComparisonContext() {
+        if (selectedSegmentData && selectedSegmentData.geometry) {
+          return {
+            kind: "selected-segment",
+            geometry: selectedSegmentData.geometry,
+            points: polylineToLonLatPoints(selectedSegmentData.geometry),
+            attributes: selectedSegmentData.attributes || {}
+          };
+        }
+
+        if (mode === "line" && points.length >= 2) {
+          return {
+            kind: "drawn-line",
+            geometry: new Polyline({
+              paths: [points],
+              spatialReference: SpatialReference.WGS84
+            }),
+            points: points.slice(),
+            attributes: null
+          };
+        }
+
+        return null;
+      }
+
+      function polylineToLonLatPoints(polyline) {
+        if (!polyline || !polyline.paths || !polyline.paths.length) return [];
+
+        const source = polyline.spatialReference && polyline.spatialReference.isWGS84 ? polyline : safeProject(polyline, SpatialReference.WGS84);
+        if (!source || !source.paths || !source.paths.length) return [];
+
+        const firstPath = source.paths[0] || [];
+        return firstPath.map(function(coord) {
+          return [coord[0], coord[1]];
+        });
+      }
+
+      async function renderResults() {
+        const context = getActiveComparisonContext();
+        if (!context) {
+          resultsBody.innerHTML = '<tr><td colspan="6">Select a segment or draw a line with at least 2 points to populate the comparison table.</td></tr>';
+          return;
+        }
+
+        const line = context.geometry;
+        const comparisonPoints = context.points;
 
         try {
           await projection.load();
@@ -550,6 +672,10 @@
         }
 
         const rows = [];
+
+        if (context.kind === "selected-segment") {
+          rows.push(makeSurveyGradeRow(context.attributes));
+        }
 
         rows.push(makeMeasurementRow({
           label: "NAD 1983 StatePlane California III FIPS 0403 (US Feet) / EPSG:2227",
@@ -570,7 +696,7 @@
           spatialReferenceUnitOfMeasure: "meter",
           method: "Planar",
           noteText: "Projected with direct Lambert Conformal Conic (2SP) math using draft California statewide SPCS2022 parameters and measured with planar length in meters.",
-          compute: () => computeProjectedPolylineLength(points, projectCustomLccPoint),
+          compute: () => computeProjectedPolylineLength(comparisonPoints, projectCustomLccPoint),
           nativeFormatter: (value) => `${formatNumber(value)} m`,
           convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
@@ -629,10 +755,14 @@
           noteTitle: "Geographic vs projected coordinate systems reference"
         }));
 
-        const baseline = rows[0] && Number.isFinite(rows[0].convertedValue) ? rows[0].convertedValue : NaN;
+        const baselineIndex = rows.findIndex(function(row) {
+          return Number.isFinite(row.convertedValue);
+        });
+        const baseline = baselineIndex >= 0 ? rows[baselineIndex].convertedValue : NaN;
         const validMagnitudes = rows
-          .slice(1)
-          .map(row => Number.isFinite(row.convertedValue) && Number.isFinite(baseline) ? Math.abs(row.convertedValue - baseline) : NaN)
+          .map(function(row, index) {
+            return index !== baselineIndex && Number.isFinite(row.convertedValue) && Number.isFinite(baseline) ? Math.abs(row.convertedValue - baseline) : NaN;
+          })
           .filter(Number.isFinite)
           .sort((a, b) => a - b);
 
@@ -642,12 +772,13 @@
             row.differenceStyle = "background-color: #f3f4f6; color: #6b7280;";
             return;
           }
-          const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === 0, validMagnitudes);
+          const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === baselineIndex, validMagnitudes);
           row.differenceHtml = diffInfo.html;
           row.differenceStyle = diffInfo.style;
         });
 
-        resultsBody.innerHTML = rows.map(row => `
+        resultsBody.innerHTML = rows.map(function(row) {
+          return `
           <tr>
             <td>${row.spatialReferenceCell}</td>
             <td>${escapeHtml(row.method)}</td>
@@ -656,7 +787,40 @@
             <td class="diff-cell"${row.differenceStyle ? ` style="${escapeHtml(row.differenceStyle)}"` : ""}>${row.differenceHtml}</td>
             <td>${row.noteHtml}</td>
           </tr>
-        `).join("");
+        `;
+        }).join("");
+      }
+
+      function makeSurveyGradeRow(attributes) {
+        const truthLength = Number(attributes && attributes.truth_length);
+        const truthUnits = attributes && attributes.truth_units ? String(attributes.truth_units) : "unknown unit";
+        const convertedValue = convertSurveyValueToInternationalFeet(truthLength, truthUnits);
+
+        return {
+          spatialReferenceCell: buildSpatialReferenceCell("Survey grade measurement", truthUnits),
+          method: "Reference",
+          nativeResult: Number.isFinite(truthLength) ? `${formatNumber(truthLength)} ${truthUnits}` : "Unable to compute",
+          convertedResult: Number.isFinite(convertedValue) ? `${formatNumber(convertedValue)} intl ft` : "Unable to compute",
+          convertedValue,
+          noteHtml: escapeHtml(SURVEY_GRADE_NOTE)
+        };
+      }
+
+      function convertSurveyValueToInternationalFeet(value, unitsText) {
+        if (!Number.isFinite(value)) return NaN;
+        const normalized = String(unitsText || "").trim().toLowerCase();
+
+        if (normalized.includes("intl") && normalized.includes("ft")) return value;
+        if (normalized.includes("international") && normalized.includes("foot")) return value;
+        if (normalized.includes("us") && normalized.includes("survey") && normalized.includes("ft")) {
+          return value * US_SURVEY_FOOT_IN_METERS / INTERNATIONAL_FOOT_IN_METERS;
+        }
+        if (normalized.includes("survey foot")) {
+          return value * US_SURVEY_FOOT_IN_METERS / INTERNATIONAL_FOOT_IN_METERS;
+        }
+        if (normalized === "ft" || normalized.includes("foot") || normalized.includes("feet")) return value;
+        if (normalized.includes("meter") || normalized === "m") return value / INTERNATIONAL_FOOT_IN_METERS;
+        return NaN;
       }
 
       function buildSpatialReferenceCell(label, unitOfMeasure) {
@@ -852,8 +1016,12 @@
         if (!sortedMagnitudes.length) return 0;
         if (sortedMagnitudes.length === 1) return 1;
 
-        const exactIndex = sortedMagnitudes.findIndex(value => value === magnitude);
-        const rank = exactIndex >= 0 ? exactIndex : sortedMagnitudes.findIndex(value => value > magnitude);
+        const exactIndex = sortedMagnitudes.findIndex(function(value) {
+          return value === magnitude;
+        });
+        const rank = exactIndex >= 0 ? exactIndex : sortedMagnitudes.findIndex(function(value) {
+          return value > magnitude;
+        });
         const resolvedRank = rank >= 0 ? rank : sortedMagnitudes.length - 1;
         return resolvedRank / (sortedMagnitudes.length - 1);
       }
