@@ -133,6 +133,10 @@
     .mono {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
+
+    .diff-cell {
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -521,6 +525,7 @@
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
           },
           nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
+          convertedValueGetter: (value) => value * US_SURVEY_FOOT_IN_METERS / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
         }));
 
@@ -531,6 +536,7 @@
           note: "Projected with direct Lambert Conformal Conic (2SP) math using draft California statewide SPCS2022 parameters and measured with planar length in meters.",
           compute: () => computeProjectedPolylineLength(points, projectCustomLccPoint),
           nativeFormatter: (value) => `${formatNumber(value)} m`,
+          convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
@@ -544,6 +550,7 @@
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
           },
           nativeFormatter: (value) => `${formatNumber(value)} m`,
+          convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
@@ -557,6 +564,7 @@
             return projected ? geometryEngine.planarLength(projected, "feet") : NaN;
           },
           nativeFormatter: (value) => `${formatNumber(value)} U.S. survey ft`,
+          convertedValueGetter: (value) => value * US_SURVEY_FOOT_IN_METERS / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromUsSurveyFeet(value)
         }));
 
@@ -570,6 +578,7 @@
             return projected ? geometryEngine.planarLength(projected, "meters") : NaN;
           },
           nativeFormatter: (value) => `${formatNumber(value)} m`,
+          convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
@@ -580,12 +589,21 @@
           note: "Geodesic length is computed in meters, but EPSG:4326 does not have a native planar linear unit for line length.",
           compute: () => geometryEngine.geodesicLength(line, "meters"),
           nativeFormatter: () => "NULL",
+          convertedValueGetter: (value) => value / INTERNATIONAL_FOOT_IN_METERS,
           internationalFootFormatter: (value) => formatInternationalFeetFromMeters(value)
         }));
 
         const baseline = rows[0] && Number.isFinite(rows[0].convertedValue) ? rows[0].convertedValue : NaN;
+        const magnitudes = rows
+          .slice(1)
+          .map(row => Number.isFinite(row.convertedValue) && Number.isFinite(baseline) ? Math.abs(row.convertedValue - baseline) : NaN)
+          .filter(Number.isFinite);
+        const maxMagnitude = magnitudes.length ? Math.max(...magnitudes) : 0;
+
         rows.forEach(function(row, index) {
-          row.differenceFromBaseline = formatDifferenceFromBaseline(row.convertedValue, baseline, index === 0);
+          const diffInfo = buildDifferenceInfo(row.convertedValue, baseline, index === 0, maxMagnitude);
+          row.differenceFromBaseline = diffInfo.text;
+          row.differenceStyle = diffInfo.style;
         });
 
         resultsBody.innerHTML = rows.map(row => `
@@ -594,7 +612,7 @@
             <td>${escapeHtml(row.method)}</td>
             <td>${escapeHtml(row.nativeResult)}</td>
             <td>${escapeHtml(row.convertedResult)}</td>
-            <td>${escapeHtml(row.differenceFromBaseline)}</td>
+            <td class="diff-cell"${row.differenceStyle ? ` style="${escapeHtml(row.differenceStyle)}"` : ""}>${escapeHtml(row.differenceFromBaseline)}</td>
             <td>${escapeHtml(row.note)}</td>
           </tr>
         `).join("");
@@ -699,7 +717,7 @@
         return value * Math.PI / 180;
       }
 
-      function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, note, compute, nativeFormatter, internationalFootFormatter }) {
+      function makeMeasurementRow({ label, spatialReferenceUnitOfMeasure, method, note, compute, nativeFormatter, convertedValueGetter, internationalFootFormatter }) {
         try {
           const value = compute();
           if (!Number.isFinite(value)) {
@@ -713,14 +731,12 @@
             };
           }
 
-          const convertedValue = getConvertedValue(value, internationalFootFormatter);
-
           return {
             spatialReferenceCell: buildSpatialReferenceCell(label, spatialReferenceUnitOfMeasure),
             method,
             nativeResult: nativeFormatter(value),
             convertedResult: internationalFootFormatter(value),
-            convertedValue,
+            convertedValue: convertedValueGetter(value),
             note
           };
         } catch (err) {
@@ -736,26 +752,31 @@
         }
       }
 
-      function getConvertedValue(value, formatter) {
-        if (formatter === formatInternationalFeetFromMeters) {
-          return value / INTERNATIONAL_FOOT_IN_METERS;
-        }
-        if (formatter === formatInternationalFeetFromUsSurveyFeet) {
-          const meters = value * US_SURVEY_FOOT_IN_METERS;
-          return meters / INTERNATIONAL_FOOT_IN_METERS;
-        }
-        return NaN;
-      }
-
-      function formatDifferenceFromBaseline(value, baseline, isBaselineRow) {
+      function buildDifferenceInfo(value, baseline, isBaselineRow, maxMagnitude) {
         if (isBaselineRow) {
-          return "0.000 intl ft";
+          return {
+            text: "0.000 intl ft",
+            style: "background-color: #ffffff; color: #111827;"
+          };
         }
         if (!Number.isFinite(value) || !Number.isFinite(baseline)) {
-          return "Unable to compute";
+          return {
+            text: "Unable to compute",
+            style: ""
+          };
         }
+
         const difference = value - baseline;
-        return `${difference >= 0 ? "+" : ""}${formatNumber(difference)} intl ft`;
+        const magnitude = Math.abs(difference);
+        const intensity = maxMagnitude > 0 ? magnitude / maxMagnitude : 0;
+        const lightness = 96 - intensity * 38;
+        const backgroundColor = `hsl(0, 85%, ${lightness}%)`;
+        const textColor = lightness < 72 ? "#7f1d1d" : "#991b1b";
+
+        return {
+          text: `${difference >= 0 ? "+" : ""}${formatNumber(difference)} intl ft`,
+          style: `background-color: ${backgroundColor}; color: ${textColor};`
+        };
       }
 
       function formatInternationalFeetFromMeters(valueInMeters) {
